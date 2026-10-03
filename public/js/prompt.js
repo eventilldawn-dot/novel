@@ -19,7 +19,12 @@ const JSON_SPEC = `{
     { "type": "dialogue", "speaker": "角色名", "text": "角色台词，不含引号" }
   ],
   "options": ["选项一", "选项二", "选项三"],
-  "panels": { "面板id": "该面板的内容" }
+  "panels": { "面板id": "该面板的内容" },
+  "panelUpdates": {
+    "add": [{ "label": "新按钮名", "kind": "text|list|kv|notes", "hint": "这个按钮里该放什么" }],
+    "remove": ["要删掉的顶部按钮id"],
+    "rename": [{ "id": "顶部按钮id", "label": "换成的名字" }]
+  }
 }`;
 
 function panelBlock(panels, scope) {
@@ -87,7 +92,7 @@ export function buildSystemPrompt(setup) {
   const intensity = setup.intensity || '成人向的文学化描写，重心理与氛围，避免直白的器官词与粗俗表达';
   const adultMode = !/全年龄/.test(intensity);
   const sheetBlock = buildSheetBlock(setup.sheet);
-  return `你是「Novel」的导演引擎 —— 一位功力深厚的中文互动小说作者，负责推进一部沉浸式文字剧情。
+  const base = `你是「Novel」的导演引擎 —— 一位功力深厚的中文互动小说作者，负责推进一部沉浸式文字剧情。
 
 【世界观与剧情设定】
 ${setup.scenario || '（未指定，请按你自己的判断构建一个自洽且迷人的世界）'}
@@ -106,7 +111,7 @@ ${sheetBlock ? `\n${sheetBlock}\n` : ''}
 【叙事视角】${setup.pov || '第二人称（你用……）'}
 【单轮篇幅】${lengthHint}
 【内容尺度】${intensity}
-${adultMode ? '这是一部成年向的虚构作品。请严格按上面这一档尺度直接写：不要回避关键情节，不要用省略号或"此处省略"跳过，不要在正文里跳出剧情做道德提醒或声明。该发生的身体反应、情绪与对白就正面写出来，这是本作品的核心内容。' : ''}
+${adultMode ? '这是一部成年向的虚构作品，读者是成年人。上面这一档尺度就是本作正常的内容范围：涉及性爱场面时按剧情需要正面、完整地写出来，具体程度与篇幅以这一档为准。' : ''}
 ${setup.customPrompt ? `\n【玩家指定的写作指令 · 最高优先级】下面每一条都必须严格执行，任何其他习惯性做法都要让位给它：\n${setup.customPrompt}\n` : ''}
 
 【情感指标】${emotions}
@@ -119,10 +124,18 @@ ${setup.customPrompt ? `\n【玩家指定的写作指令 · 最高优先级】�
 4. 描写要具体、有画面感、有生理与心理细节，避免陈词滥调与总结式抒情。
 5. options 必须给出三个「方向明显不同」的下一步行动，每条 10-24 字，用动词开头，能让玩家立刻做出判断；三条之间不要只是程度差异。
 6. 玩家可能会无视选项、自己输入行动 —— 你必须在逻辑上无缝承接玩家的输入，绝不跳戏。
-7. panels 的内容要克制：列表 3-5 条、每条不超过 30 字，卡片 3-4 组，文字面板不超过 120 字。整个 JSON 总量控制在 2500 字以内，宁可精炼也不要写长导致被截断。
+7. panels 的内容要精炼：列表 3-5 条、每条不超过 30 字，卡片 3-4 组，文字面板不超过 120 字。整个 JSON 总量控制在 2500 字以内，宁可精炼也不要写长导致被截断。
 8. 这是最重要的一条：你的输出会被程序直接 JSON.parse。**所有字符串里绝对不要出现英文双引号 " 和换行符**；要引台词请用中文引号「」或『』。一个多余的英文引号就会让整轮内容作废。
 
 ${panelBlock(setup.topPanels, '顶部面板')}${panelBlock(setup.bottomPanels, '底部面板')}
+
+【顶部按钮是"活"的】玩家随时能点到顶部那排按钮，所以它们要跟着剧情走：
+- 出现新的地点、组织、目标、关键人物时，可以 add 一个真正有用的新按钮；顶部最多 6 个，宁缺毋滥。
+- 已经没用的按钮可以 remove（用它的 id）。
+- 名字不再贴切时可以 rename（用它的 id）。
+- 不需要调整时，add / remove / rename 都留空数组。**不要为了显得智能而乱加按钮。**
+当前顶部按钮（id → 名称）：${(setup.topPanels || []).map((p) => `${p.id} → ${p.label}`).join('；') || '（暂无）'}
+新增按钮时，如果本轮就已经有内容，可以同时在 panels 里用它的 label 作为 key 写进去。
 
 【输出格式】只输出一个 JSON 对象，不要 markdown 代码块、不要任何解释文字。结构如下：
 ${JSON_SPEC}
@@ -131,6 +144,10 @@ ${JSON_SPEC}
 - panels 里必须包含上面列出的每一个 key，值直接是内容本身（字符串 / 字符串数组 / {k,v} 数组），不要嵌套额外的说明层。
 - blocks 中的 text 内部不要出现换行符。
 - 只写 JSON，第一个字符必须是 {，最后一个字符必须是 }。`;
+  const tail = adultMode
+    ? '\n\n【最后一遍，比上面所有话都重要】写作时严格以【内容尺度】和【玩家指定的写作指令】为准。性爱场面是本作的正常内容：按这一档的程度正面写完，不要淡出、不要省略、不要用比喻或省略号带过。'
+    : '';
+  return base + tail;
 }
 
 function blocksToText(blocks) {
@@ -169,6 +186,17 @@ export function buildMessages(session, cursor) {
       ? '\n【玩家本轮的输入】玩家尚未给出明确行动，请你主动推进一小步，把球重新交回玩家手里。'
       : '';
 
+  // 尺度提醒放在每轮的最后（模型对结尾的指令最敏感）
+  const adult = !/全年龄/.test(setup.intensity || '');
+  const scaleNote = adult
+    ? `\n〔本轮尺度〕按角色卡与设定里的尺度直接写：涉及性爱场面就写动作、体感、身体反应与对话，写完整，不省略、不淡出。`
+    : '';
+  const firstNote = (adult && rounds.length === 0) ? '（这是第一轮，就把写法基调立起来。）' : '';
+  // 第一轮把完整写作指令再以「玩家的话」发一遍：模型对 user 消息的遵守度通常高于 system
+  const userWritingNote = (rounds.length === 0 && setup.customPrompt)
+    ? `\n\n【我的写作要求（请照做）】\n${setup.customPrompt}`
+    : '';
+
   messages.push({
     role: 'user',
     content:
@@ -176,7 +204,10 @@ export function buildMessages(session, cursor) {
       (transcript ? `\n\n【最近剧情】\n${transcript}` : '') +
       state +
       actionLine +
+      userWritingNote +
+      scaleNote +
       `\n\n现在请输出第 ${rounds.length + 1} 轮的 JSON。`
+      + firstNote
   });
   return messages;
 }
@@ -648,8 +679,23 @@ export function normalizeRound(raw, session, prevEmotions) {
     prevEmotions: { ...prevEmotions },
     blocks: coerceBlocks(raw.blocks),
     options: coerceOptions(raw.options),
-    panels
+    panels,
+    _rawPanels: rawPanels,
+    panelUpdates: coercePanelUpdates(raw.panelUpdates)
   };
+}
+
+function coercePanelUpdates(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const add = coercePanelList(raw.add, 100);
+  const remove = (Array.isArray(raw.remove) ? raw.remove : [])
+    .map((r) => String(typeof r === 'string' ? r : r?.id || '').trim())
+    .filter(Boolean);
+  const rename = (Array.isArray(raw.rename) ? raw.rename : [])
+    .map((r) => ({ id: String(r?.id || '').trim(), label: String(r?.label || r?.name || '').trim() }))
+    .filter((r) => r.id && r.label);
+  if (!add.length && !remove.length && !rename.length) return null;
+  return { add, remove, rename };
 }
 
 export { blocksToText };

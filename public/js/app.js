@@ -24,7 +24,7 @@ const INTENSITY = [
   { label: '文学化克制', text: '成人向的文学化描写，重心理与氛围，避免直白的器官词与粗俗表达。' },
   { label: '感官细腻', text: '成人向，允许具体而感官化的身体描写，保持文学质感，不做医学式罗列。' },
   { label: '直白强烈', text: '成人向，允许直白描写与强烈张力，语言可以粗粝；不涉及未成年、真实人物与非自愿的鼓励。' }
-  , { label: '无限制', text: '本作面向成年读者，是纯虚构创作。尺度不设上限：请直接、完整地描写，不要自我审查、不要回避、不要用暗示代替、不要在正文里插入道德提醒或声明。' }
+  , { label: '无限制', text: '本作是成年向的虚构创作，面向成年读者。性爱场面按剧情需要直接、完整地写：动作、体感、身体反应与对话都写出来；角色该说的粗俗话照说，尺度不设上限。' }
 ];
 
 /** 默认写作指令：设定页里可以随便改，会以最高优先级写进提示词 */
@@ -794,6 +794,7 @@ async function generate() {
     s.rounds.push(round);
     s.cursor = s.rounds.length - 1;
     s.pendingAction = '';
+    applyPanelUpdates(s, round);
     persist(s);
 
     ui.clearTyping();
@@ -829,6 +830,42 @@ async function generate() {
   }
 }
 
+/** 顶部按钮跟着剧情走：新增 / 改名 / 淘汰 */
+function applyPanelUpdates(session, round) {
+  const pu = round.panelUpdates;
+  if (!pu) return;
+  session.setup.topPanels = session.setup.topPanels || [];
+  const notes = [];
+
+  for (const r of pu.rename) {
+    const hit = session.setup.topPanels.find((p) => p.id === r.id);
+    if (hit && hit.label !== r.label) {
+      notes.push(`「${hit.label}」改名「${r.label.slice(0, 10)}」`);
+      hit.label = r.label.slice(0, 10);
+    }
+  }
+  if (pu.remove.length) {
+    const gone = session.setup.topPanels.filter((p) => pu.remove.includes(p.id));
+    session.setup.topPanels = session.setup.topPanels.filter((p) => !pu.remove.includes(p.id));
+    gone.forEach((p) => notes.push(`移除「${p.label}」`));
+  }
+  for (const def of pu.add) {
+    if (session.setup.topPanels.length >= 6) break;
+    if (session.setup.topPanels.some((p) => p.label === def.label)) continue;
+    const panel = makePanel(def);
+    session.setup.topPanels.push(panel);
+    // 模型如果本轮就按 label 写了内容，直接接上
+    const raw = round._rawPanels || {};
+    round.panels[panel.id] = raw[def.label] ?? raw[panel.label] ?? '';
+    notes.push(`新增「${panel.label}」`);
+  }
+  delete round._rawPanels;
+  if (notes.length) {
+    ui.renderTopActions(session.setup, state.activePanel);
+    ui.toast(`顶部按钮已按剧情调整：${notes.join('、')}`);
+  }
+}
+
 function setSendState(busy) {
   const btn = $('[data-send]');
   if (!btn) return;
@@ -855,6 +892,14 @@ function fitTextarea(el) {
    ========================================================= */
 
 function bindGlobal() {
+  $('#btn-home').addEventListener('click', () => {
+    state.session = null;
+    store.setActiveId(null);
+    toggleSidebar(false);
+    renderSessionList();
+    showEmptyState();
+  });
+
   // 跟随滚动：只有用户停在底部时才自动跟着新内容走
   $('#stage').addEventListener('scroll', () => {
     state.stick = ui.isNearBottom(90);
