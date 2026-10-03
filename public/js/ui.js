@@ -308,3 +308,46 @@ export function renderSessionList(sessions, activeId) {
       <span class="session-del" data-del="${esc(s.id)}">✕</span>
     </button>`).join('');
 }
+
+export function renderSyncBar(info) {
+  const bar = $('#sync-bar');
+  if (!bar) return;
+  if (!info) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.className = `sync-bar ${info.status || ''}`;
+  bar.title = info.title || '';
+  bar.querySelector('.sync-text').textContent = info.text;
+}
+
+/* ---------------- 同步 / 存储状态 ---------------- */
+
+export function renderSyncStatus({ kind, error, busy, count, serverUrl, storagePath = '本机浏览器的 localStorage' }) {
+  const map = {
+    server: { cls: 'synced', dot: '☁', text: '已同步 · 存在本机服务' },
+    remote: { cls: 'synced', dot: '☁', text: '已同步 · 远程服务' },
+    local: { cls: '', dot: '▣', text: '仅本机浏览器' }
+  };
+  const base = map[kind] || map.local;
+  let status = base.cls;
+  let text = base.text;
+  if (error) { status = 'error'; text = `同步失败：${error}`; }
+  else if (busy) { status = 'syncing'; text = '同步中…'; }
+  else if (kind !== 'local' && count) { text = `${base.text} · ${count} 部剧情`; }
+
+  renderSyncBar({
+    status,
+    text,
+    title: kind === 'local'
+      ? '剧情存在这台设备的浏览器里，换设备看不到。启动电脑上的 server.js 后改为跨设备同步。'
+      : `所有剧情保存在服务上（${serverUrl || '当前地址'}），同一服务的设备共用一份。`
+  });
+
+  return {
+    kind,
+    error,
+    busy,
+    count,
+    serverUrl,
+    storage: kind === 'local' ? storagePath : `${serverUrl || '当前站点'} → data/sessions.json`
+  };
+}

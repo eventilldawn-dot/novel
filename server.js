@@ -14,6 +14,8 @@ const os = require('os');
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const CONFIG_PATH = path.join(ROOT, 'config.json');
+const DATA_DIR = path.join(ROOT, 'data');
+const STORE_FILE = path.join(DATA_DIR, 'sessions.json');
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 
@@ -25,7 +27,8 @@ const DEFAULTS = {
   maxTokens: 8000,
   stream: true,
   jsonMode: true,
-  timeoutMs: 180000
+  timeoutMs: 180000,
+  syncToken: ''
 };
 
 let config = { ...DEFAULTS };
@@ -43,7 +46,7 @@ function loadConfig() {
 
 async function saveConfig(patch) {
   const next = { ...config };
-  for (const key of ['baseUrl', 'apiKey', 'model', 'systemExtra']) {
+  for (const key of ['baseUrl', 'apiKey', 'model', 'systemExtra', 'syncToken']) {
     if (typeof patch[key] === 'string') next[key] = patch[key].trim();
   }
   for (const key of ['temperature', 'maxTokens', 'timeoutMs']) {
@@ -118,6 +121,114 @@ function lanAddresses() {
     }
   }
   return out;
+}
+
+/* =========================================================
+   跨设备同步：把「所有剧情」存在服务器上，各端连过来共用一份
+   ========================================================= */
+
+let storeCache = null;
+let storeWriting = null;
+
+async function loadStore() {
+  if (storeCache) return storeCache;
+  try {
+    const raw = await fsp.readFile(STORE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    storeCache = { updatedAt: parsed.updatedAt || 0, sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [] };
+  } catch {
+    storeCache = { updatedAt: 0, sessions: [] };
+  }
+  return storeCache;
+}
+
+async function persistStore() {
+  if (!storeCache) return;
+  storeCache.updatedAt = Date.now();
+  const payload = JSON.stringify(storeCache);
+  if (storeWriting) return storeWriting;
+  storeWriting = (async () => {
+    await fsp.mkdir(DATA_DIR, { recursive: true });
+    const tmp = `${STORE_FILE}.tmp`;
+    await fsp.writeFile(tmp, payload, 'utf8');
+    try { await fsp.copyFile(STORE_FILE, `${STORE_FILE}.bak`); } catch { /* 首次没有旧文件 */ }
+    await fsp.rename(tmp, STORE_FILE);
+  })().finally(() => { storeWriting = null; });
+  return storeWriting;
+}
+
+/** 合并：同 id 取 updatedAt 更新的那份；deleted 里的 id 直接删掉 */
+function mergeStore(incoming, deleted) {
+  const map = new Map((storeCache?.sessions || []).map((s) => [s.id, s]));
+  for (const id of deleted || []) map.delete(id);
+  for (const s of incoming || []) {
+    if (!s || !s.id) continue;
+    const old = map.get(s.id);
+    if (!old || (s.updatedAt || 0) >= (old.updatedAt || 0)) map.set(s.id, s);
+  }
+  storeCache.sessions = Array.from(map.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  return storeCache;
+}
+
+function withCors(req, res) {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Novel-Token');
+    res.setHeader('Access-Control-Max-Age', '86400');
+  }
+}
+
+/** 跨域访问（比如从线上版连回家里的服务）需要同步口令；同源访问不需要 */
+function crossOriginBlocked(req) {
+  const origin = req.headers.origin;
+  if (!origin) return null;
+  let sameHost = false;
+  try {
+    const o = new URL(origin);
+    const host = String(req.headers.host || '').split(':')[0];
+    sameHost = o.hostname === host || o.hostname === 'localhost' || o.hostname === '127.0.0.1';
+  } catch { /* 坏 Origin 当跨域处理 */ }
+  if (sameHost) return null;
+  if (config.syncToken && req.headers['x-novel-token'] === config.syncToken) return null;
+  return { ok: false, error: 'forbidden', message: config.syncToken ? '同步口令不正确。' : '跨域访问被拒绝。' };
+}
+
+async function handleStore(req, res, pathname) {
+  if (req.method === 'GET') {
+    const store = await loadStore();
+    return sendJson(res, 200, { ok: true, updatedAt: store.updatedAt, sessions: store.sessions });
+  }
+  if (req.method === 'POST' || req.method === 'PUT') {
+    let body;
+    try {
+      body = await readBody(req, 32 * 1024 * 1024);
+    } catch (err) {
+      return sendJson(res, 400, { ok: false, error: 'bad_request', message: err.message });
+    }
+    await loadStore();
+    const sessions = Array.isArray(body) ? body : (body.sessions || []);
+    const deleted = Array.isArray(body?.deleted) ? body.deleted : [];
+    mergeStore(sessions, deleted);
+    await persistStore();
+    return sendJson(res, 200, {
+      ok: true,
+      updatedAt: storeCache.updatedAt,
+      count: storeCache.sessions.length,
+      sessions: Array.isArray(body?.sessions) && body.echo ? storeCache.sessions : undefined
+    });
+  }
+  if (req.method === 'DELETE') {
+    const id = new URL(req.url, 'http://x').searchParams.get('id');
+    await loadStore();
+    if (id) mergeStore([], [id]);
+    else storeCache.sessions = [];
+    await persistStore();
+    return sendJson(res, 200, { ok: true, count: storeCache.sessions.length });
+  }
+  return sendJson(res, 405, { ok: false, message: '不支持的请求方法' });
 }
 
 async function serveStatic(req, res, pathname) {
@@ -356,13 +467,30 @@ const server = http.createServer(async (req, res) => {
   const parsed = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsed.pathname;
 
+  if (pathname.startsWith('/api/')) {
+    withCors(req, res);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+  }
+
+  if (pathname.startsWith('/api/store')) {
+    const blocked = crossOriginBlocked(req);
+    if (blocked) return sendJson(res, 403, blocked);
+    return handleStore(req, res, pathname);
+  }
+
   if (pathname === '/api/health') {
     return sendJson(res, 200, {
       ok: true,
       engine: config.apiKey ? 'llm' : 'local',
       model: config.model,
       hasKey: Boolean(config.apiKey),
-      port: PORT
+      port: PORT,
+      sync: true,
+      host: os.hostname()
     });
   }
 
@@ -420,6 +548,13 @@ const server = http.createServer(async (req, res) => {
 });
 
 loadConfig();
+
+// 首次运行生成一个同步口令：跨域（例如从线上版连回家里）访问存储接口时需要它
+if (!config.syncToken) {
+  config.syncToken = require('crypto').randomBytes(12).toString('hex');
+  saveConfig({}).catch(() => {});
+}
+
 server.listen(PORT, HOST, () => {
   const lines = [
     '',
@@ -427,9 +562,12 @@ server.listen(PORT, HOST, () => {
     `  \x1b[2m本机访问\x1b[0m   http://localhost:${PORT}`,
   ];
   for (const addr of lanAddresses()) {
-    lines.push(`  \x1b[2m局域网访问\x1b[0m ${addr.address.includes('.') ? `http://${addr.address}:${PORT}` : addr.address}  \x1b[2m(${addr.name})\x1b[0m`);
+    lines.push(`  \x1b[2m局域网访问\x1b[0m http://${addr.address}:${PORT}  \x1b[2m(${addr.name} · 手机/平板用这个)\x1b[0m`);
   }
   lines.push(`  \x1b[2m模型状态\x1b[0m   ${config.apiKey ? `已配置 ${config.model}` : '未配置 Key → 使用本地示例引擎'}`);
+  lines.push(`  \x1b[2m剧情存储\x1b[0m   ${path.relative(ROOT, STORE_FILE)}  \x1b[2m(各端共用一份)\x1b[0m`);
+  lines.push(`  \x1b[2m同步口令\x1b[0m   ${config.syncToken}`);
+  lines.push(`  \x1b[2m提示\x1b[0m      同一 WiFi 下，手机/平板直接访问上面的局域网地址即可，剧情自动同步`);
   lines.push('');
   console.log(lines.join('\n'));
 });

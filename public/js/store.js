@@ -81,6 +81,9 @@ export const store = {
     }
     write(KEY_SESSIONS, list);
     return { added, total: list.length };
+  },
+  replaceAll(sessions) {
+    write(KEY_SESSIONS, Array.isArray(sessions) ? sessions : []);
   }
 };
 

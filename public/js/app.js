@@ -7,6 +7,7 @@ import {
   PANEL_LIBRARY, makePanel, cloneTemplate, suggestSetupLocal
 } from './presets.js';
 import { store, newSession } from './store.js';
+import * as syncApi from './sync.js';
 import {
   generateRound, server, designSetup, testConnection,
   localConfig, PROVIDERS, probeServer, resolveTransport
@@ -33,7 +34,8 @@ const state = {
   health: { engine: 'local' },
   serverCfg: {},
   bannerDismissed: false,
-  lastFailure: null
+  lastFailure: null,
+  sync: { available: false, kind: 'local', base: '', busy: false, lastSync: 0, error: '', count: 0 }
 };
 
 let draft = null; // 设定页草稿
@@ -45,6 +47,7 @@ let draft = null; // 设定页草稿
 async function boot() {
   bindGlobal();
   bindSetup();
+  await bootSync();
   renderSessionList();
 
   state.health = await server.health();
@@ -60,6 +63,114 @@ async function boot() {
   }
   updateEngineBadge();
   refreshEngineBanner();
+}
+
+/* ---------------- 跨设备同步 ---------------- */
+
+const pushQueue = { sessions: new Map(), deleted: new Set(), timer: null };
+
+function updateSyncUI() {
+  const s = syncApi.syncState();
+  state.sync = { ...state.sync, ...s };
+  ui.renderSyncStatus({
+    kind: s.kind,
+    error: s.error,
+    busy: s.busy,
+    count: s.count,
+    serverUrl: s.kind === 'remote' ? s.serverUrl : (location.origin + ' 的服务')
+  });
+}
+
+function queuePush(session) {
+  if (!state.sync.available) return;
+  pushQueue.sessions.set(session.id, session);
+  schedulePush();
+}
+
+function queueDelete(id) {
+  if (!state.sync.available) return;
+  pushQueue.deleted.add(id);
+  pushQueue.sessions.delete(id);
+  schedulePush();
+}
+
+function schedulePush() {
+  clearTimeout(pushQueue.timer);
+  pushQueue.timer = setTimeout(flushPush, 800);
+}
+
+async function flushPush() {
+  if (!state.sync.available) return;
+  if (!pushQueue.sessions.size && !pushQueue.deleted.size) return;
+  const payload = { sessions: Array.from(pushQueue.sessions.values()), deleted: Array.from(pushQueue.deleted) };
+  pushQueue.sessions.clear();
+  pushQueue.deleted.clear();
+  state.sync.busy = true;
+  updateSyncUI();
+  try {
+    await syncApi.push(payload);
+    syncApi.clearError();
+  } catch (err) {
+    syncApi.markError(err.message);
+  } finally {
+    state.sync.busy = false;
+    updateSyncUI();
+  }
+}
+
+async function bootSync() {
+  const ok = await syncApi.initSync();
+  updateSyncUI();
+  if (!ok) return;
+
+  state.sync.busy = true;
+  updateSyncUI();
+  try {
+    const remote = await syncApi.pull();
+    const merged = syncApi.mergeSessions(store.listSessions(), remote.sessions || []);
+    store.replaceAll(merged);
+    // 把本机独有的（比如之前在浏览器里写的）补推上去
+    await syncApi.push({ sessions: merged, deleted: [] });
+    syncApi.clearError();
+  } catch (err) {
+    syncApi.markError(err.message);
+  } finally {
+    state.sync.busy = false;
+    updateSyncUI();
+  }
+}
+
+async function runFullSync() {
+  if (!state.sync.available) {
+    ui.toast('没有可用的同步服务：启动电脑上的 server.js，或用局域网地址打开。', 'warn');
+    return;
+  }
+  state.sync.busy = true;
+  updateSyncUI();
+  try {
+    const remote = await syncApi.pull();
+    const merged = syncApi.mergeSessions(store.listSessions(), remote.sessions || []);
+    store.replaceAll(merged);
+    await syncApi.push({ sessions: merged, deleted: [] });
+    syncApi.clearError();
+    renderSessionList();
+    if (state.session) {
+      const fresh = merged.find((s) => s.id === state.session.id);
+      if (fresh) {
+        state.session = fresh;
+        ui.renderRounds(state.session, { futureCount: state.session.rounds.length - 1 - state.session.cursor });
+        ui.renderHUD(state.session);
+        ui.renderRoundNav(state.session);
+      }
+    }
+    ui.toast(`同步完成，共 ${merged.length} 部剧情。`);
+  } catch (err) {
+    syncApi.markError(err.message);
+    ui.toast(`同步失败：${err.message}`, 'warn');
+  } finally {
+    state.sync.busy = false;
+    updateSyncUI();
+  }
 }
 
 function updateEngineBadge() {
@@ -99,6 +210,17 @@ async function refreshEngineBanner(force) {
 
 function renderSessionList() {
   ui.renderSessionList(store.listSessions(), state.session?.id || null);
+}
+
+/** 存到本机 + 排队推到服务器 */
+function persist(session) {
+  store.saveSession(session);
+  queuePush(session);
+}
+
+function dropSession(id) {
+  store.removeSession(id);
+  queueDelete(id);
 }
 
 function showEmptyState() {
@@ -424,7 +546,7 @@ function bindSetup() {
       return;
     }
     const session = newSession(setup);
-    store.saveSession(session);
+    persist(session);
     $('#screen-setup').classList.remove('open');
     enterSession(session);
     generate();
@@ -483,7 +605,7 @@ async function generate() {
     s.rounds.push(round);
     s.cursor = s.rounds.length - 1;
     s.pendingAction = '';
-    store.saveSession(s);
+    persist(s);
 
     ui.clearTyping();
     ui.renderRounds(s, { futureCount: 0 });
@@ -555,13 +677,15 @@ function bindGlobal() {
     if (e.target.closest('[data-banner-action]')) openSettings();
   });
 
+  $('#sync-bar').addEventListener('click', () => openSettings());
+
   $('#session-list').addEventListener('click', (e) => {
     const del = e.target.closest('[data-del]');
     if (del) {
       e.stopPropagation();
       const id = del.dataset.del;
       confirmModal('删除这条剧情档案？', '删除后无法恢复。', () => {
-        store.removeSession(id);
+        dropSession(id);
         if (state.session?.id === id) {
           state.session = null;
           const next = store.listSessions()[0];
@@ -695,7 +819,7 @@ function gotoRound(index) {
   if (index < 0) { ui.toast('已经是第一轮了。'); return; }
   if (index >= s.rounds.length) return;
   s.cursor = index;
-  store.saveSession(s);
+  persist(s);
   state.activePanel = null;
   ui.closeDrawer();
   ui.renderRounds(s, { futureCount: s.rounds.length - 1 - s.cursor });
@@ -715,7 +839,7 @@ function regenerate() {
   s.rounds = s.rounds.slice(0, s.cursor);
   s.cursor = s.rounds.length - 1;
   s.pendingAction = action;
-  store.saveSession(s);
+  persist(s);
   ui.renderRounds(s, { interactive: false });
   ui.renderRoundNav(s);
   generate();
@@ -763,6 +887,7 @@ async function openSettings() {
   const cfg = (await server.getConfig()).config || {};
   state.serverCfg = cfg;
   const local = localConfig.read();
+  const syncCfg = syncApi.syncConfig.read();
   const srv = await probeServer(true);
   const info = await server.info();
   const urls = (info.addresses || []).map((u) => `<span class="hl">${esc(u)}</span>`).join('、');
@@ -818,6 +943,15 @@ async function openSettings() {
         ${Object.entries(modeLabels).map(([k, v]) => `<button class="chip${mode === k ? ' active' : ''}" data-mode="${k}">${esc(v)}</button>`).join('')}
       </div>
     </div>
+    <div class="field">
+      <label class="field-label">跨设备同步<span class="field-hint">所有剧情存在跑 server.js 的那台电脑上</span></label>
+      <div class="diag" id="s-sync-state"></div>
+      <input id="s-sync-url" type="text" value="${esc(syncCfg.serverUrl || '')}" placeholder="http://192.168.1.14:8787（线上版想连回家里时填）" />
+      <input id="s-sync-token" type="text" value="${esc(syncCfg.token || '')}" placeholder="同步口令（启动 server.js 时终端会打印）" style="margin-top:8px" />
+      <div class="chip-row" style="margin-top:9px">
+        <button class="chip" id="s-sync-now">立即同步</button>
+      </div>
+    </div>
     <div class="tip">
       ${srv.up
         ? `本机服务：已连接（${esc(cfg.baseUrl || '')}），Key ${cfg.hasKey ? '已配置' : '未配置'}。`
@@ -867,6 +1001,37 @@ async function openSettings() {
       chip.classList.add('active');
     });
 
+    const syncBox = modal.querySelector('#s-sync-state');
+    const paintSync = () => {
+      const s = syncApi.syncState();
+      const text = s.error
+        ? `✕ ${s.error}`
+        : s.kind === 'server'
+          ? `✓ 已连上本机服务。所有剧情保存在 ${location.origin} 这台电脑的 data/sessions.json 里，用同一个地址打开的每台设备共用这一份。`
+          : s.kind === 'remote'
+            ? `✓ 已连上远程服务 ${s.serverUrl}，各端共用一份。`
+            : '✕ 当前只存在这台设备的浏览器里，换设备看不到。启动电脑上的 server.js，或者用局域网地址打开本页，就会自动同步。';
+      syncBox.className = `diag ${s.available && !s.error ? 'ok' : 'bad'}`;
+      syncBox.innerHTML = `<b>跨设备同步：${s.available && !s.error ? '已开启' : '未开启'}</b>${esc(text)}`;
+    };
+    paintSync();
+
+    const applySyncForm = async () => {
+      syncApi.syncConfig.write({
+        serverUrl: modal.querySelector('#s-sync-url').value.trim(),
+        token: modal.querySelector('#s-sync-token').value.trim()
+      });
+      await syncApi.initSync();
+      updateSyncUI();
+      paintSync();
+    };
+
+    modal.querySelector('#s-sync-now').addEventListener('click', async () => {
+      await applySyncForm();
+      await runFullSync();
+      paintSync();
+    });
+
     const showResult = (r) => {
       const box = modal.querySelector('#s-result');
       box.innerHTML = `<div class="diag ${r.ok ? 'ok' : 'bad'}">
@@ -911,6 +1076,11 @@ async function openSettings() {
       if (f.key) patch.apiKey = f.key;
       localConfig.write(patch);
       if (srv.up) await server.saveConfig(patch);
+      syncApi.syncConfig.write({
+        serverUrl: modal.querySelector('#s-sync-url').value.trim(),
+        token: modal.querySelector('#s-sync-token').value.trim()
+      });
+      await syncApi.initSync();
       state.serverCfg = (await server.getConfig()).config || {};
       await probeServer(true);
       state.health = await server.health();
@@ -918,6 +1088,8 @@ async function openSettings() {
       state.bannerDismissed = false;
       ui.closeModal();
       updateEngineBadge();
+      updateSyncUI();
+      if (state.sync.available) runFullSync();
       await refreshEngineBanner(true);
       const has = Boolean(f.key) || Boolean(localConfig.read().apiKey) || state.serverCfg.hasKey;
       ui.toast(has ? '已保存，下一轮开始用真实模型生成。' : '已保存（还没有 Key，仍是本地示例引擎）。');
