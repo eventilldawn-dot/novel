@@ -7,7 +7,7 @@
  *   · 跨域请求（模型接口、隧道）一律不碰
  */
 
-const CACHE = 'novel-shell-v1';
+const CACHE = 'novel-shell-v2';
 
 const SHELL = [
   './',
@@ -61,16 +61,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 静态资源：缓存优先 + 后台悄悄更新
+  // 静态资源：网络优先（保证更新立刻生效），断网时回退到缓存
   event.respondWith(
-    caches.match(req).then((hit) => {
-      const network = fetch(req)
-        .then((res) => {
-          if (res && res.ok) caches.open(CACHE).then((c) => c.put(req, res.clone()));
-          return res;
-        })
-        .catch(() => hit);
-      return hit || network;
-    })
+    fetch(req)
+      .then((res) => {
+        if (res && res.ok) caches.open(CACHE).then((c) => c.put(req, res.clone()));
+        return res;
+      })
+      .catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html')))
   );
 });
