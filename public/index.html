@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#080b10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <title>Novel · 沉浸式文字剧情</title>
+  <link rel="icon" href="./favicon.svg" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- ============ 侧栏（桌面常驻 / 移动端抽屉） ============ -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <div class="brand"><span class="brand-mark"></span><span>Novel</span></div>
+        <button class="icon-btn" id="btn-new" title="新建剧情">＋</button>
+      </div>
+      <div class="sidebar-body">
+        <div class="sidebar-label">剧情档案</div>
+        <div class="session-list" id="session-list"></div>
+      </div>
+      <div class="sidebar-foot">
+        <button class="ghost-btn" id="btn-settings">⚙ 设置</button>
+        <button class="ghost-btn" id="btn-data">⇅ 数据</button>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim" hidden></div>
+
+    <!-- ============ 主区 ============ -->
+    <main class="main">
+      <header class="topbar">
+        <button class="icon-btn" id="btn-sidebar" title="档案">☰</button>
+        <div class="title-wrap">
+          <span class="title-icon" id="title-icon">✦</span>
+          <span class="title-text" id="title-text">Novel</span>
+        </div>
+        <div class="topbar-actions" id="top-actions"></div>
+      </header>
+
+      <section class="hud" id="hud">
+        <div class="hud-row">
+          <div class="act-name" id="act-name">尚未开始</div>
+          <div class="act-meta" id="act-meta"></div>
+        </div>
+        <div class="emotion-strip" id="emotion-strip"></div>
+      </section>
+
+      <div class="engine-banner" id="engine-banner" hidden></div>
+
+      <section class="stage" id="stage">
+        <div class="rounds" id="rounds"></div>
+      </section>
+
+      <section class="drawer" id="drawer" hidden>
+        <div class="drawer-head">
+          <span class="drawer-title" id="drawer-title">面板</span>
+          <button class="icon-btn" id="drawer-close" title="收起">✕</button>
+        </div>
+        <div class="drawer-body" id="drawer-body"></div>
+        <div class="drawer-foot" id="drawer-foot" hidden></div>
+      </section>
+
+      <div class="round-nav" id="round-nav" hidden>
+        <button class="nav-btn" id="nav-prev" title="上一轮">‹</button>
+        <button class="nav-count" id="nav-count">0 / 0</button>
+        <button class="nav-btn" id="nav-next" title="下一轮">›</button>
+      </div>
+
+      <nav class="bottombar" id="bottombar"></nav>
+    </main>
+  </div>
+
+  <!-- ============ 开场设定页 ============ -->
+  <section class="screen" id="screen-setup">
+    <div class="setup-wrap">
+      <header class="setup-head">
+        <div class="setup-brand">Novel<span>·</span><em>沉浸式文字剧情引擎</em></div>
+        <button class="icon-btn" id="setup-close" title="返回">✕</button>
+      </header>
+
+      <div class="setup-scroll">
+        <div class="field">
+          <label class="field-label" for="f-title">剧情名称<span class="field-hint">留空会自动命名</span></label>
+          <input id="f-title" type="text" placeholder="例：白衬衫的一夜" />
+        </div>
+
+        <div class="field">
+          <label class="field-label">
+            题材模板
+            <button class="auto-btn" id="btn-autodesign" type="button">✨ 让导演按剧情自动配置按钮与情感条</button>
+          </label>
+          <div class="template-grid" id="template-grid"></div>
+          <div class="chip-row" style="margin-top:10px">
+            <button class="chip active" id="chk-autodesign" type="button">开始剧情时，自动按剧情配置按钮与情感条</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-scenario">人设剧情指令<span class="field-hint">世界观、主线、规则、节奏，写得越具体，导演越准</span></label>
+          <textarea id="f-scenario" rows="7" placeholder="例：现代都市的加密直播产业，主角靠拍摄影片改善生活条件……"></textarea>
+        </div>
+
+        <div class="field-2col">
+          <div class="field">
+            <label class="field-label" for="f-user">我扮演的角色</label>
+            <textarea id="f-user" rows="3" placeholder="你的身份、性格、说话方式"></textarea>
+          </div>
+          <div class="field">
+            <label class="field-label" for="f-target">对方角色（核心对象）</label>
+            <textarea id="f-target" rows="3" placeholder="代号、身份、软肋、此刻状态"></textarea>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-opening">开场状态</label>
+          <textarea id="f-opening" rows="2" placeholder="第一幕从哪一刻开始"></textarea>
+        </div>
+
+        <div class="field-3col">
+          <div class="field">
+            <label class="field-label">叙事风格</label>
+            <select id="f-tone"></select>
+          </div>
+          <div class="field">
+            <label class="field-label">叙事视角</label>
+            <select id="f-pov"></select>
+          </div>
+          <div class="field">
+            <label class="field-label">单轮篇幅</label>
+            <select id="f-length"></select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="f-emotions">情感指标<span class="field-hint">逗号分隔，顶部实时显示，5 个最佳</span></label>
+          <input id="f-emotions" type="text" placeholder="好感度, 愉悦度, 羞耻度, 痛苦, 沉溺" />
+          <div class="chip-row" id="emotion-preset-row"></div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">内容尺度<span class="field-hint">写给导演引擎的调性说明</span></label>
+          <div class="chip-row" id="intensity-row"></div>
+          <textarea id="f-intensity" rows="2"></textarea>
+        </div>
+
+        <div class="field">
+          <label class="field-label">顶部按钮<span class="field-hint">对话中随时点开的快捷面板</span></label>
+          <div class="panel-editor" id="top-panel-editor"></div>
+          <button class="add-btn" data-add-panel="top">＋ 添加顶部面板</button>
+        </div>
+
+        <div class="field">
+          <label class="field-label">底部按钮<span class="field-hint">实时反馈面板，按剧情设定自由增删</span></label>
+          <div class="panel-editor" id="bottom-panel-editor"></div>
+          <button class="add-btn" data-add-panel="bottom">＋ 添加底部面板</button>
+        </div>
+
+        <div class="setup-note" id="setup-note"></div>
+      </div>
+
+      <footer class="setup-foot">
+        <button class="primary-btn" id="setup-start">开始剧情 →</button>
+      </footer>
+    </div>
+  </section>
+
+  <!-- ============ 通用弹层 ============ -->
+  <div class="modal-root" id="modal-root" hidden>
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

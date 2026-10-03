@@ -1,0 +1,15 @@
+{
+  "name": "novel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Novel - 沉浸式文字剧情对话引擎（手机 / 平板 / 电脑均可访问）",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

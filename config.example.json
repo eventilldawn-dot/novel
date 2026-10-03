@@ -1,0 +1,11 @@
+{
+  "_说明": "复制本文件为 config.json 即可生效；也可以直接在网页右上角『设置』里填写并保存。",
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKey": "",
+  "model": "gpt-4o-mini",
+  "temperature": 1.0,
+  "maxTokens": 2600,
+  "stream": true,
+  "jsonMode": true,
+  "timeoutMs": 180000
+}

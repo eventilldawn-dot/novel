@@ -1,0 +1,35 @@
+# 部署到网上（GitHub Pages）
+
+这个项目是**纯前端**的：`public/` 目录本身就是一个完整的网站，不需要服务器、不需要构建。
+模型调用走**浏览器直连**（DeepSeek 的接口支持跨域），API Key 只存在访问者自己的浏览器里。
+
+仓库里的 `.github/workflows/pages.yml` 已经配好：只要推送到 `main`，GitHub 会自动把 `public/` 发布到 Pages。
+
+## 一次性设置
+
+1. 推送代码到 GitHub 仓库（默认分支 `main`）。
+2. 打开仓库 **Settings → Pages**，把 **Source** 改成 **GitHub Actions**。
+   （或者用命令行：`gh api -X POST repos/OWNER/REPO/pages -f build_type=workflow`）
+3. 等 Actions 跑完，访问 `https://OWNER.github.io/REPO/`。
+
+## 访问者要做什么
+
+打开网址 → 右上角 `⚙` → 填自己的 API Key（默认已按 DeepSeek 配好地址和模型）→ 保存 → 开始写剧情。
+Key 存在浏览器 localStorage，只用于直接请求模型服务，不经过任何第三方服务器。
+
+## 其他静态托管
+
+`public/` 目录可以直接丢到任何静态托管上：
+
+- **Netlify**：把 `public/` 拖到 app.netlify.com/drop
+- **Vercel**：`vercel deploy public --prod`（Framework 选 Other）
+- **Cloudflare Pages**：构建命令留空，输出目录填 `public`
+
+## 自己的服务器（可选）
+
+如果想让 Key 留在服务器上、多设备共用一个配置，就跑 `node server.js`：
+
+- 局域网使用：手机 / 平板访问 `http://<你的内网IP>:8787`
+- 公网使用：用任意反向代理（Nginx / Caddy / Cloudflare Tunnel）指向 `localhost:8787`
+
+此时前端会优先用服务器代理，Key 不出本机。
