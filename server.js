@@ -564,6 +564,7 @@ server.listen(PORT, HOST, () => {
   for (const addr of lanAddresses()) {
     lines.push(`  \x1b[2m局域网访问\x1b[0m http://${addr.address}:${PORT}  \x1b[2m(${addr.name} · 手机/平板用这个)\x1b[0m`);
   }
+  lines.push(`  \x1b[2m备用地址\x1b[0m   http://${os.hostname()}:${PORT}  \x1b[2m(IP 变了也能用)\x1b[0m`);
   lines.push(`  \x1b[2m模型状态\x1b[0m   ${config.apiKey ? `已配置 ${config.model}` : '未配置 Key → 使用本地示例引擎'}`);
   lines.push(`  \x1b[2m剧情存储\x1b[0m   ${path.relative(ROOT, STORE_FILE)}  \x1b[2m(各端共用一份)\x1b[0m`);
   lines.push(`  \x1b[2m同步口令\x1b[0m   ${config.syncToken}`);
