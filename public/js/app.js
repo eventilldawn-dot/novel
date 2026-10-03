@@ -299,6 +299,14 @@ function enterSession(session) {
     session.setup.customPrompt = DEFAULT_CUSTOM_PROMPT;
     persist(session);
   }
+  // 旧版「无限制」文案里有"不要自我审查"这类元指令，反而会让模型保守 —— 一律升级成新版
+  if (/不要自我审查|不要回避、不要用暗示代替/.test(session.setup.intensity || '')) {
+    const newer = INTENSITY.find((i) => i.label === '无限制');
+    if (newer && session.setup.intensity !== newer.text) {
+      session.setup.intensity = newer.text;
+      persist(session);
+    }
+  }
   store.setActiveId(session.id);
   $('#screen-setup').classList.remove('open');
   $('#title-icon').textContent = session.setup.emoji || '✦';
