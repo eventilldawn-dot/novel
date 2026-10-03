@@ -231,10 +231,13 @@ function updateEngineBadge() {
 async function refreshEngineBanner(force) {
   if (state.bannerDismissed && !force) return;
   if (state.lastFailure) {
+    const actions = state.failureRetry
+      ? [{ label: '重试', key: 'retry' }, { label: '去设置', key: 'settings' }]
+      : [{ label: '去设置', key: 'settings' }];
     ui.renderEngineBanner({
       kind: 'error',
       text: state.lastFailure,
-      action: '去设置'
+      actions
     });
     return;
   }
@@ -252,7 +255,7 @@ async function refreshEngineBanner(force) {
     ui.renderEngineBanner({
       kind: 'warn',
       text: '当前是本地示例引擎（未配置 API Key），文字会比较生硬。接上 DeepSeek 后同一套剧情立刻变得自然。',
-      action: '去设置'
+      actions: [{ label: '去设置', key: 'settings' }]
     });
   } else {
     ui.renderEngineBanner(null);
@@ -265,7 +268,10 @@ function renderSessionList() {
 
 /** 存到本机 + 排队推到服务器 */
 function persist(session) {
-  store.saveSession(session);
+  const ok = store.saveSession(session);
+  if (!ok) {
+    ui.toast('本机浏览器存不下了（localStorage 已满）。数据仍会同步到电脑上；建议到「⇅ 数据」导出备份，再删掉几部旧剧情。', 'warn');
+  }
   queuePush(session);
 }
 
@@ -766,14 +772,6 @@ async function generate() {
   const s = state.session;
   if (!s || state.generating) return;
 
-  // 若已经回退到中途，先把后续轮次存成分支
-  if (s.cursor < s.rounds.length - 1) {
-    const tail = s.rounds.slice(s.cursor + 1);
-    s.branches = s.branches || [];
-    s.branches.push({ at: s.cursor, atTime: Date.now(), rounds: tail });
-    s.rounds = s.rounds.slice(0, s.cursor + 1);
-  }
-
   state.generating = true;
   state.activePanel = null;
   ui.closeDrawer();
@@ -801,14 +799,23 @@ async function generate() {
     round.i = s.cursor + 1;
     round.playerAction = s.pendingAction || '';
     round.createdAt = Date.now();
+    // 生成成功之后才处理"从中间继续"：把原来的后续轮次存成分支再覆盖
+    // （失败时什么都不动，玩家的剧情不会有任何损失）
+    if (s.cursor < s.rounds.length - 1) {
+      const tail = s.rounds.slice(s.cursor + 1);
+      s.branches = s.branches || [];
+      s.branches.push({ at: s.cursor, atTime: Date.now(), rounds: tail });
+      s.rounds = s.rounds.slice(0, s.cursor + 1);
+    }
     s.rounds.push(round);
     s.cursor = s.rounds.length - 1;
     s.pendingAction = '';
     applyPanelUpdates(s, round);
+    delete round._rawPanels;          // 调试用的中间字段，不进存储
     persist(s);
 
     ui.clearTyping();
-    ui.renderRounds(s, { futureCount: 0 });
+    ui.renderLastRound(s, { futureCount: 0 });
     ui.renderHUD(s);
     ui.flashEmotions();
     ui.renderRoundNav(s);
@@ -828,9 +835,16 @@ async function generate() {
     }
   } catch (err) {
     ui.clearTyping();
-    ui.renderRounds(s, { futureCount: 0 });
-    if (err.name === 'AbortError') ui.toast('已停止本轮生成。');
-    else ui.toast(`生成失败：${err.message}`, 'warn');
+    ui.renderLastRound(s, { futureCount: Math.max(0, s.rounds.length - 1 - s.cursor) });
+    if (err.name === 'AbortError') {
+      ui.toast('已停止本轮生成。');
+    } else {
+      // 生成失败：本轮不写入任何内容，把玩家刚才的输入留着，等他重试
+      state.lastFailure = `本轮生成失败：${err.message}${err.hint ? `\n建议：${err.hint}` : ''}`;
+      state.failureRetry = true;
+      await refreshEngineBanner(true);
+      ui.toast('生成失败，本轮没有写入任何内容。点顶部提示里的「重试」再试一次。', 'warn');
+    }
   } finally {
     state.generating = false;
     state.abort = null;
@@ -902,6 +916,9 @@ function fitTextarea(el) {
    ========================================================= */
 
 function bindGlobal() {
+  $('#title-text').addEventListener('click', renameSession);
+  $('#title-text').title = '点击改名';
+
   $('#btn-home').addEventListener('click', () => {
     state.session = null;
     store.setActiveId(null);
@@ -933,7 +950,16 @@ function bindGlobal() {
       ui.renderEngineBanner(null);
       return;
     }
-    if (e.target.closest('[data-banner-action]')) openSettings();
+    const btn = e.target.closest('[data-banner-action]');
+    if (!btn) return;
+    if (btn.dataset.bannerAction === 'retry') {
+      state.lastFailure = null;
+      state.failureRetry = false;
+      refreshEngineBanner(true);
+      generate();
+      return;
+    }
+    openSettings();
   });
 
   $('#sync-bar').addEventListener('click', () => openSettings());
@@ -1095,12 +1121,12 @@ function regenerate() {
   const s = state.session;
   if (!s || s.cursor < 0) return;
   const round = s.rounds[s.cursor];
-  const action = round.playerAction || '';
-  s.rounds = s.rounds.slice(0, s.cursor);
-  s.cursor = s.rounds.length - 1;
-  s.pendingAction = action;
+  // 只把游标退回去，先不删数据 —— 万一重新生成失败，原作还在
+  s.pendingAction = round.playerAction || '';
+  s.cursor -= 1;
+  state.stick = true;
   persist(s);
-  ui.renderRounds(s, { interactive: false });
+  ui.renderRounds(s, { futureCount: s.rounds.length - 1 - s.cursor });
   ui.renderRoundNav(s);
   generate();
 }
@@ -1110,6 +1136,37 @@ function regenerate() {
    ========================================================= */
 
 /** 修改当前剧情的尺度与写作指令（不必重开一局） */
+function renameSession() {
+  const s = state.session;
+  if (!s) return;
+  ui.openModal(`
+    <h3>给这部剧情改个名字</h3>
+    <div class="field">
+      <input id="rn-input" type="text" value="${esc(s.title)}" maxlength="40" />
+    </div>
+    <div class="row">
+      <button class="cancel" data-close-modal>取消</button>
+      <button class="ok" id="rn-save">保存</button>
+    </div>
+  `, (modal) => {
+    const input = modal.querySelector('#rn-input');
+    input.focus();
+    input.select();
+    const save = () => {
+      const v = input.value.trim();
+      if (!v) { ui.toast('名字不能为空。', 'warn'); return; }
+      s.title = v.slice(0, 40);
+      persist(s);
+      $('#title-text').textContent = s.title;
+      renderSessionList();
+      ui.closeModal();
+      ui.toast('已改名。');
+    };
+    modal.querySelector('#rn-save').addEventListener('click', save);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+  });
+}
+
 function openWriting() {
   const s = state.session;
   if (!s) return;
@@ -1454,6 +1511,22 @@ async function openSettings() {
   });
 }
 
+/** 触发下载：必须把 <a> 挂进 DOM，否则 Safari / 部分手机浏览器会静默失败 */
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    a.remove();
+    URL.revokeObjectURL(url);
+  }, 1500);
+}
+
 function openData() {
   const synced = state.sync.available;
   const serverUrl = state.sync.kind === 'remote' ? state.sync.serverUrl : location.origin;
@@ -1463,6 +1536,7 @@ function openData() {
     <div class="kvline"><span>存储位置</span><span>${synced ? esc(serverUrl) + ' 的 data/sessions.json' : '本机浏览器 localStorage'}</span></div>
     <div class="tip">导出的 JSON 包含全部剧情、选项与面板快照，可以在另一台设备导入继续。<br>
       ${synced ? '当前已连上服务，会自动同步。' : '当前没有连上服务，数据只在这台设备上 —— 想搬去另一台设备，用下面的「复制 / 粘贴」。'}</div>
+    ${state.session ? '<div class="row"><button class="cancel" id="d-export-txt" style="flex:1">导出当前剧情为 TXT（当小说存下来）</button></div>' : ''}
     <div class="row">
       <button class="cancel" id="d-copy">复制全部到剪贴板</button>
       <button class="cancel" id="d-paste">从剪贴板导入</button>
@@ -1475,6 +1549,28 @@ function openData() {
       <button class="danger" id="d-clear" style="flex:1">清空全部剧情</button>
     </div>
   `, (modal) => {
+    modal.querySelector('#d-export-txt')?.addEventListener('click', () => {
+      const s = state.session;
+      if (!s) return;
+      const out = [s.title, `（共 ${s.rounds.length} 轮 · 导出于 ${new Date().toLocaleString('zh-CN')}）`, ''];
+      for (const r of s.rounds) {
+        out.push(`—— 第 ${r.i + 1} 轮 · ${r.scene.act} · ${r.scene.time} ${r.scene.phase} ——`);
+        if (r.playerAction) out.push(`〔你的行动〕${r.playerAction}`);
+        out.push('');
+        for (const b of r.blocks || []) {
+          out.push(b.type === 'dialogue'
+            ? `${b.speaker ? `${b.speaker}：` : ''}“${b.text}”`
+            : b.text);
+          out.push('');
+        }
+        if (r.options?.length) out.push(`【本轮的三个走向】${r.options.join(' / ')}`);
+        out.push('');
+      }
+      const blob = new Blob([out.join('\n')], { type: 'text/plain;charset=utf-8' });
+      downloadBlob(blob, `${String(s.title).replace(/[\\/:*?"<>|]/g, '_')}.txt`);
+      ui.toast('已导出 TXT，在浏览器的下载里。');
+    });
+
     modal.querySelector('#d-copy').addEventListener('click', async () => {
       const text = JSON.stringify(store.exportAll());
       try {
@@ -1499,11 +1595,7 @@ function openData() {
     });
     modal.querySelector('#d-export').addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(store.exportAll(), null, 2)], { type: 'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `novel-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      downloadBlob(blob, `novel-backup-${new Date().toISOString().slice(0, 10)}.json`);
       ui.toast('已导出备份文件。');
     });
     modal.querySelector('#d-import').addEventListener('click', () => {

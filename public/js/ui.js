@@ -147,6 +147,23 @@ export function renderRounds(session, opts = {}) {
 }
 
 /** 生成中把输入区锁住（不整体重绘，避免画面跳动） */
+/** 只重绘最后一轮（长剧情时避免整篇重排，手机上明显更快） */
+export function renderLastRound(session, opts = {}) {
+  const host = $('#rounds');
+  const i = session.cursor;
+  const el = host.querySelector(`.round[data-i="${i}"]`);
+  if (!el || !session.rounds[i]) { renderRounds(session, opts); return; }
+  const stage = $('#stage');
+  const keepTop = stage.scrollTop;
+  const wasAtBottom = stage.scrollHeight - stage.scrollTop - stage.clientHeight < 90;
+  el.outerHTML = roundHTML(session.rounds[i], i, {
+    isLast: true,
+    interactive: opts.interactive !== false,
+    futureCount: opts.futureCount || 0
+  });
+  if (!wasAtBottom) stage.scrollTop = keepTop;
+}
+
 export function lockComposer(lock) {
   const composer = $('[data-composer]');
   if (!composer) return;
@@ -314,9 +331,12 @@ export function renderEngineBanner(info) {
   if (!info) { el.hidden = true; el.innerHTML = ''; return; }
   el.hidden = false;
   el.className = `engine-banner ${info.kind || 'info'}`;
+  const actions = (info.actions || (info.action ? [{ label: info.action, key: 'settings' }] : []))
+    .map((a) => `<button class="banner-btn" data-banner-action="${esc(a.key)}">${esc(a.label)}</button>`)
+    .join('');
   el.innerHTML = `
     <span class="banner-text">${esc(info.text)}</span>
-    ${info.action ? `<button class="banner-btn" data-banner-action>${esc(info.action)}</button>` : ''}
+    ${actions}
     <button class="banner-close" data-banner-close title="收起">✕</button>`;
 }
 

@@ -36,8 +36,7 @@ export const store = {
     if (i >= 0) list[i] = session;
     else list.unshift(session);
     list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    write(KEY_SESSIONS, list.slice(0, 60));
-    return session;
+    return write(KEY_SESSIONS, list.slice(0, 60));
   },
   removeSession(id) {
     write(KEY_SESSIONS, this.listSessions().filter((s) => s.id !== id));

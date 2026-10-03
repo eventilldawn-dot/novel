@@ -133,6 +133,7 @@ async function consumeStream(response, onPartial) {
   let buffer = '';
   let text = '';
   let notified = 0;
+  let lastPush = 0;
 
   for (;;) {
     const { done, value } = await reader.read();
@@ -154,8 +155,11 @@ async function consumeStream(response, onPartial) {
       text += delta;
       if (onPartial) {
         const blocks = partialBlocks(text);
-        if (blocks.length > notified) {
+        const now = Date.now();
+        // 节流：手机上每秒钟重排十几次会很卡，控制在一秒 8 次以内
+        if (blocks.length > notified && now - lastPush > 120) {
           notified = blocks.length;
+          lastPush = now;
           onPartial(blocks, text);
         }
       }
@@ -326,6 +330,12 @@ export async function generateRound({ session, cursor, onPartial, signal, styleS
     return { round, engine: 'llm', repaired: salvaged };
   } catch (err) {
     if (err.name === 'AbortError') throw err;
+    // 配了 Key 却调用失败：宁可什么都不写，也绝不把示例引擎的模板文字塞进玩家的剧情
+    if (err.kind !== 'no_key') {
+      err.retryable = true;
+      throw err;
+    }
+    // 完全没配 Key：才降级到本地示例引擎
     const round = await localRound({
       session,
       cursor,
@@ -335,11 +345,7 @@ export async function generateRound({ session, cursor, onPartial, signal, styleS
     return {
       round: makeRound(session, round, prevEmotions, 'local'),
       engine: 'local',
-      failed: true,
-      failureKind: err.kind || 'unknown',
-      warning: err.kind === 'no_key'
-        ? '未配置模型 API Key，本轮由本地示例引擎生成（文字偏模板化）。'
-        : `模型调用失败：${err.message}${err.hint ? `\n建议：${err.hint}` : ''}`
+      warning: '未配置模型 API Key，本轮由本地示例引擎生成（文字偏模板化）。'
     };
   }
 }
