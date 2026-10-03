@@ -42,7 +42,7 @@ function headers() {
 
 async function probe(base) {
   try {
-    const res = await fetch(`${base}/api/health`, { cache: 'no-store' });
+    const res = await fetch(`${base}/api/health`, { headers: headers(), cache: 'no-store' });
     if (!res.ok) return null;
     const data = await res.json();
     return data?.ok ? data : null;

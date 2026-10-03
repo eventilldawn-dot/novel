@@ -181,19 +181,51 @@ function withCors(req, res) {
   }
 }
 
-/** 跨域访问（比如从线上版连回家里的服务）需要同步口令；同源访问不需要 */
-function crossOriginBlocked(req) {
+/**
+ * 判断这次请求是不是"从公网进来的"（走了隧道 / 反向代理）。
+ * 局域网 IP、机器名、localhost 都算内网，不需要口令。
+ */
+function isExternalHost(req) {
+  const host = String(req.headers.host || '').split(':')[0].toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return false;
+  if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === os.hostname().toLowerCase()) return false;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return false;   // 任何 IPv4（含内网）
+  if (host.includes(':')) return false;                      // IPv6
+  if (!host.includes('.')) return false;                     // 局域网里的机器名
+  if (host.endsWith('.local')) return false;
+  return true;
+}
+
+function isCrossOrigin(req) {
   const origin = req.headers.origin;
-  if (!origin) return null;
-  let sameHost = false;
+  if (!origin) return false;
   try {
     const o = new URL(origin);
-    const host = String(req.headers.host || '').split(':')[0];
-    sameHost = o.hostname === host || o.hostname === 'localhost' || o.hostname === '127.0.0.1';
-  } catch { /* 坏 Origin 当跨域处理 */ }
-  if (sameHost) return null;
-  if (config.syncToken && req.headers['x-novel-token'] === config.syncToken) return null;
-  return { ok: false, error: 'forbidden', message: config.syncToken ? '同步口令不正确。' : '跨域访问被拒绝。' };
+    const host = String(req.headers.host || '').split(':')[0].toLowerCase();
+    if (o.hostname.toLowerCase() === host) return false;
+    if (o.hostname === 'localhost' || o.hostname === '127.0.0.1') return false;
+  } catch {
+    return true;
+  }
+  return true;
+}
+
+function tokenMatches(req, url) {
+  const token = req.headers['x-novel-token'] || url.searchParams.get('token');
+  return Boolean(config.syncToken) && token === config.syncToken;
+}
+
+/** 公网访问、或从别的站点跨域连过来：必须带口令 */
+function authBlocked(req, url) {
+  if (!isExternalHost(req) && !isCrossOrigin(req)) return null;
+  if (tokenMatches(req, url)) return null;
+  return {
+    ok: false,
+    error: 'need_token',
+    message: isExternalHost(req)
+      ? '需要访问口令。请用带 ?token= 的完整地址打开（启动 server.js 时会打印）。'
+      : '同步口令不正确。'
+  };
 }
 
 async function handleStore(req, res, pathname) {
@@ -474,11 +506,11 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
+    const blocked = authBlocked(req, parsed);
+    if (blocked) return sendJson(res, 403, blocked);
   }
 
   if (pathname.startsWith('/api/store')) {
-    const blocked = crossOriginBlocked(req);
-    if (blocked) return sendJson(res, 403, blocked);
     return handleStore(req, res, pathname);
   }
 

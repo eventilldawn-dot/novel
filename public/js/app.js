@@ -45,6 +45,9 @@ let draft = null; // 设定页草稿
    ========================================================= */
 
 async function boot() {
+  // 用带令牌的地址打开时（例如内网穿透的公网地址 ?token=xxx），先把它记下来
+  const urlToken = new URLSearchParams(location.search).get('token');
+  if (urlToken) syncApi.syncConfig.write({ token: urlToken.trim() });
   bindGlobal();
   bindSetup();
   await bootSync();
@@ -192,6 +195,15 @@ async function refreshEngineBanner(force) {
     ui.renderEngineBanner({
       kind: 'error',
       text: state.lastFailure,
+      action: '去设置'
+    });
+    return;
+  }
+  const srv = await probeServer();
+  if (srv.needToken) {
+    ui.renderEngineBanner({
+      kind: 'error',
+      text: '这个地址需要访问口令。请用带 ?token=… 的完整地址打开（启动 server.js 时终端会打印），或直接在设置里填入口令。',
       action: '去设置'
     });
     return;

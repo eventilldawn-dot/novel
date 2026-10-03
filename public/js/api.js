@@ -13,6 +13,7 @@ import {
   normalizeDesign, partialBlocks
 } from './prompt.js';
 import { localRound } from './engine.js';
+import { syncConfig } from './sync.js';
 
 const KEY_LLM = 'novel.llm.v1';
 
@@ -43,18 +44,35 @@ export const localConfig = {
 };
 
 async function jsonFetch(url, options) {
-  const res = await fetch(url, options);
+  const token = syncConfig.read().token;
+  const res = await fetch(url, {
+    ...options,
+    headers: { ...(token ? { 'X-Novel-Token': token } : {}), ...((options && options.headers) || {}) }
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
+function apiHeaders() {
+  const token = syncConfig.read().token;
+  return { 'Content-Type': 'application/json', ...(token ? { 'X-Novel-Token': token } : {}) };
+}
+
 export const server = {
-  health: () => jsonFetch('/api/health').catch(() => ({ ok: false, engine: 'local' })),
+  health: async () => {
+    try {
+      const res = await fetch('/api/health', { headers: apiHeaders(), cache: 'no-store' });
+      if (!res.ok) return { ok: false, status: res.status };
+      return await res.json();
+    } catch {
+      return { ok: false };
+    }
+  },
   info: () => jsonFetch('/api/info').catch(() => ({ ok: false, addresses: [] })),
   getConfig: () => jsonFetch('/api/config').catch(() => ({ ok: false, config: {} })),
   saveConfig: (patch) => jsonFetch('/api/config', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: apiHeaders(),
     body: JSON.stringify(patch)
   }).catch(() => ({ ok: false, config: {} })),
   models: () => jsonFetch('/api/models').catch(() => ({ ok: false, models: [] }))
@@ -64,7 +82,12 @@ let serverAlive = null;
 export async function probeServer(force) {
   if (serverAlive !== null && !force) return serverAlive;
   const health = await server.health();
-  serverAlive = { up: Boolean(health?.ok), hasKey: Boolean(health?.hasKey), model: health?.model || '' };
+  serverAlive = {
+    up: Boolean(health?.ok),
+    hasKey: Boolean(health?.hasKey),
+    model: health?.model || '',
+    needToken: health?.status === 403
+  };
   return serverAlive;
 }
 
@@ -153,7 +176,7 @@ export async function request({ messages, stream = true, json = true, onPartial,
   if (t.kind === 'server') {
     const res = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders(),
       body: JSON.stringify({ messages, stream }),
       signal
     });
@@ -231,7 +254,7 @@ export async function testConnection(override) {
     };
   }
   if (t.kind === 'server') {
-    return jsonFetch('/api/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+    return jsonFetch('/api/test', { method: 'POST', headers: apiHeaders(), body: '{}' })
       .catch((err) => ({ ok: false, message: `本地服务没响应：${err.message}` }));
   }
   const cfg = t.cfg || {};
