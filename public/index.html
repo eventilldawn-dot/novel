@@ -74,6 +74,8 @@
         <button class="nav-btn" id="nav-next" title="下一轮">›</button>
       </div>
 
+      <button class="jump-bottom" id="jump-bottom" hidden>新内容 ↓</button>
+
       <nav class="bottombar" id="bottombar"></nav>
     </main>
   </div>
@@ -149,6 +151,7 @@
           <label class="field-label">内容尺度<span class="field-hint">写给导演引擎的调性说明</span></label>
           <div class="chip-row" id="intensity-row"></div>
           <textarea id="f-intensity" rows="2"></textarea>
+          <div class="field-tip">注意：这一档只控制本应用的提示词。<b>模型服务商自己的内容审核无法被本应用覆盖</b> —— DeepSeek 等国内模型会拦掉成人内容（且可能影响账号），想写这一档建议在设置里换成不受限的模型（例如本地模型）。</div>
         </div>
 
         <div class="field">

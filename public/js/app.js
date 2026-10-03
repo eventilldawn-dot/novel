@@ -35,6 +35,7 @@ const state = {
   serverCfg: {},
   bannerDismissed: false,
   lastFailure: null,
+  stick: true,          // 是否"粘"在底部：用户在往上翻的时候不要把他拽回去
   sync: { available: false, kind: 'local', base: '', busy: false, lastSync: 0, error: '', count: 0 }
 };
 
@@ -128,6 +129,18 @@ async function flushPush() {
   } finally {
     state.sync.busy = false;
     updateSyncUI();
+  }
+}
+
+/** 生成过程中别强行把用户拽到底部 —— 只有他自己停在底部时才跟随 */
+function followScroll(instant) {
+  const stage = $('#stage');
+  if (stage) stage.dataset.stick = String(state.stick);
+  if (state.stick) {
+    ui.scrollToBottom(!instant);
+    ui.setJumpButton(false);
+  } else {
+    ui.setJumpButton(true);
   }
 }
 
@@ -277,6 +290,8 @@ function enterSession(session) {
   ui.closeDrawer();
   renderSessionList();
   refreshEngineBanner();
+  state.stick = true;
+  ui.setJumpButton(false);
   requestAnimationFrame(() => ui.scrollToBottom(false));
 }
 
@@ -603,7 +618,7 @@ async function generate() {
   ui.closeDrawer();
   ui.renderRounds(s, { interactive: false });
   ui.showTyping();
-  ui.scrollToBottom();
+  if (state.stick) ui.scrollToBottom(false);
   setSendState(true);
 
   const controller = new AbortController();
@@ -617,7 +632,7 @@ async function generate() {
       onPartial: (blocks) => {
         ui.hideTyping();
         ui.renderStreamingRound(s, blocks);
-        ui.scrollToBottom(false);
+        followScroll(true);
       }
     });
 
@@ -635,7 +650,7 @@ async function generate() {
     ui.flashEmotions();
     ui.renderRoundNav(s);
     renderSessionList();
-    ui.scrollToBottom();
+    followScroll(false);
     if (warning) {
       state.lastFailure = warning;
       await refreshEngineBanner(true);
@@ -672,6 +687,7 @@ function submitAction(text) {
   const s = state.session;
   if (!s || state.generating) return;
   const value = String(text || '').trim();
+  state.stick = true;                 // 玩家主动出招，跟着往下看
   s.pendingAction = value;
   generate();
 }
@@ -686,6 +702,19 @@ function fitTextarea(el) {
    ========================================================= */
 
 function bindGlobal() {
+  // 跟随滚动：只有用户停在底部时才自动跟着新内容走
+  $('#stage').addEventListener('scroll', () => {
+    state.stick = ui.isNearBottom(90);
+    $('#stage').dataset.stick = String(state.stick);
+    if (state.stick) ui.setJumpButton(false);
+  }, { passive: true });
+
+  $('#jump-bottom').addEventListener('click', () => {
+    state.stick = true;
+    ui.setJumpButton(false);
+    ui.scrollToBottom(true);
+  });
+
   // 侧栏
   $('#btn-sidebar').addEventListener('click', () => toggleSidebar(true));
   $('#scrim').addEventListener('click', () => toggleSidebar(false));

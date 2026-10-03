@@ -181,6 +181,19 @@ export function scrollToBottom(smooth = true) {
   stage.scrollTo({ top: stage.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
 
+/** 用户是不是还在底部（或者离底部很近） */
+export function isNearBottom(threshold = 90) {
+  const stage = $('#stage');
+  return stage.scrollHeight - stage.scrollTop - stage.clientHeight < threshold;
+}
+
+/** 「有新内容 ↓」按钮 */
+export function setJumpButton(visible) {
+  const btn = $('#jump-bottom');
+  if (!btn) return;
+  btn.hidden = !visible;
+}
+
 /* ---------------- 顶栏 / 底栏 / 导航 ---------------- */
 
 export function renderTopActions(setup, activeId) {

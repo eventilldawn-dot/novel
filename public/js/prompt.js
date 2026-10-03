@@ -35,6 +35,8 @@ function panelBlock(panels, scope) {
 export function buildSystemPrompt(setup) {
   const emotions = (setup.emotions || []).join('、');
   const lengthHint = setup.lengthHint || '控制在 350-500 字，有场景与对白。';
+  const intensity = setup.intensity || '成人向的文学化描写，重心理与氛围，避免直白的器官词与粗俗表达';
+  const adultMode = !/全年龄/.test(intensity);
   return `你是「Novel」的导演引擎 —— 一位功力深厚的中文互动小说作者，负责推进一部沉浸式文字剧情。
 
 【世界观与剧情设定】
@@ -52,7 +54,8 @@ ${setup.opening || '（未指定，请自行写出一个有力的开场）'}
 【叙事风格】${setup.tone || '沉浸式小说'}
 【叙事视角】${setup.pov || '第二人称（你用……）'}
 【单轮篇幅】${lengthHint}
-【内容尺度】${setup.intensity || '成人向的文学化描写，重心理与氛围，避免直白的器官词与粗俗表达'}
+【内容尺度】${intensity}
+${adultMode ? '这是一部成年向的虚构作品。请严格按上面这一档尺度直接写：不要回避关键情节，不要用省略号或"此处省略"跳过，不要在正文里跳出剧情做道德提醒或声明。该发生的身体反应、情绪与对白就正面写出来，这是本作品的核心内容。' : ''}
 
 【情感指标】${emotions}
 情感值范围 0-100 的整数，只随剧情因果变化，不要无理由跳变。上一轮的数值会给你参考。
