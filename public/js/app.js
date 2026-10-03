@@ -830,6 +830,7 @@ async function openSettings() {
       <button class="cancel" id="s-test">测试连接</button>
       <button class="ok" id="s-save">保存</button>
     </div>
+    ${local.apiKey ? '<div class="row"><button class="danger" id="s-forget" style="flex:1">清除本机浏览器里保存的 Key</button></div>' : ''}
   `, (modal) => {
     const readForm = () => ({
       baseUrl: modal.querySelector('#s-base').value.trim(),
@@ -887,6 +888,18 @@ async function openSettings() {
       const r = await testConnection(override && override.apiKey ? override : undefined);
       if (!f.key && !prevApi) localConfig.write({ apiKey: '' });
       showResult(r);
+    });
+
+    modal.querySelector('#s-forget')?.addEventListener('click', async () => {
+      localConfig.clear();
+      if (srv.up) await server.saveConfig({ apiKey: '' });
+      state.serverCfg = (await server.getConfig()).config || {};
+      await probeServer(true);
+      state.lastFailure = null;
+      ui.closeModal();
+      updateEngineBadge();
+      await refreshEngineBanner(true);
+      ui.toast('已清除本机保存的 API Key。');
     });
 
     modal.querySelector('#s-save').addEventListener('click', async () => {
