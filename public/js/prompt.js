@@ -86,7 +86,7 @@ ${keys},
   ];
 }
 
-export function buildSystemPrompt(setup) {
+export function buildSystemPrompt(setup, opts = {}) {
   const emotions = (setup.emotions || []).join('、');
   const lengthHint = setup.lengthHint || '控制在 350-500 字，有场景与对白。';
   const intensity = setup.intensity || '成人向的文学化描写，重心理与氛围，避免直白的器官词与粗俗表达';
@@ -124,7 +124,7 @@ ${setup.customPrompt ? `\n【玩家指定的写作指令 · 最高优先级】�
 4. 描写要具体、有画面感、有生理与心理细节，避免陈词滥调与总结式抒情。
 5. options 必须给出三个「方向明显不同」的下一步行动，每条 10-24 字，用动词开头，能让玩家立刻做出判断；三条之间不要只是程度差异。
 6. 玩家可能会无视选项、自己输入行动 —— 你必须在逻辑上无缝承接玩家的输入，绝不跳戏。
-7. panels 的内容要精炼：列表 3-5 条、每条不超过 30 字，卡片 3-4 组，文字面板不超过 120 字。整个 JSON 总量控制在 2500 字以内，宁可精炼也不要写长导致被截断。
+7. panels 的内容要精炼：列表 3-5 条、每条不超过 30 字，卡片 3-4 组，文字面板不超过 120 字。正文按【单轮篇幅】写足，panels 保持精炼即可。
 8. 这是最重要的一条：你的输出会被程序直接 JSON.parse。**所有字符串里绝对不要出现英文双引号 " 和换行符**；要引台词请用中文引号「」或『』。一个多余的英文引号就会让整轮内容作废。
 
 ${panelBlock(setup.topPanels, '顶部面板')}${panelBlock(setup.bottomPanels, '底部面板')}
@@ -147,7 +147,11 @@ ${JSON_SPEC}
   const tail = adultMode
     ? '\n\n【最后一遍，比上面所有话都重要】写作时严格以【内容尺度】和【玩家指定的写作指令】为准。性爱场面是本作的正常内容：按这一档的程度正面写完，不要淡出、不要省略、不要用比喻或省略号带过。'
     : '';
-  return base + tail;
+  const style = String(opts.styleSample || '').trim();
+  const styleBlock = style
+    ? `\n\n【文风参考 · 行文必须向它靠拢】\n下面这段是玩家认可的范文。请学习它的：段落密度、句子的长短节奏、细节落在什么地方（写什么、不写什么）、对白与动作的比例、以及怎么把身体感受与情绪写具体。**不要照抄它的情节、人物名或原句**，只学写法；涉及性爱场面时的写法也向它看齐。\n篇幅仍按【单轮篇幅】的设定，但单位篇幅里的细节浓度、描写密度要和范文一致 —— 不要因为篇幅短就把段落写薄。\n\n---\n${style}\n---`
+    : '';
+  return base + styleBlock + tail;
 }
 
 function blocksToText(blocks) {
@@ -159,10 +163,10 @@ function blocksToText(blocks) {
     .join('\n');
 }
 
-export function buildMessages(session, cursor) {
+export function buildMessages(session, cursor, opts = {}) {
   const setup = session.setup;
   const rounds = session.rounds.slice(0, cursor + 1);
-  const system = buildSystemPrompt(setup);
+  const system = buildSystemPrompt(setup, { styleSample: opts.styleSample });
   const messages = [{ role: 'system', content: system }];
 
   const memory = rounds.length ? rounds[rounds.length - 1].memory : '';

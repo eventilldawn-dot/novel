@@ -300,13 +300,16 @@ function makeRound(session, parsed, prevEmotions, engine) {
   return round;
 }
 
-export async function generateRound({ session, cursor, onPartial, signal }) {
+export async function generateRound({ session, cursor, onPartial, signal, styleSample }) {
   const prevEmotions = cursor >= 0
     ? session.rounds[cursor].emotions
     : Object.fromEntries(session.setup.emotions.map((k) => [k, 0]));
 
   try {
-    const raw = await request({ messages: buildMessages(session, cursor), stream: true, json: true, onPartial, signal });
+    const raw = await request({
+      messages: buildMessages(session, cursor, { styleSample }),
+      stream: true, json: true, onPartial, signal
+    });
     let parsed;
     let salvaged = false;
     try {

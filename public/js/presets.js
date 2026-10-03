@@ -302,7 +302,8 @@ export const TEMPLATES = [
 export const LENGTH_PRESETS = {
   short: { name: '短（约 200 字）', hint: '控制在 150-250 字，节奏快。' },
   medium: { name: '中（约 400 字）', hint: '控制在 350-500 字，有场景与对白。' },
-  long: { name: '长（约 700 字）', hint: '控制在 600-900 字，允许分镜式铺陈。' }
+  long: { name: '长（约 700 字）', hint: '控制在 600-900 字，允许分镜式铺陈。' },
+  extra: { name: '超长（约 1200 字）', hint: '控制在 1000-1400 字。段落要密：环境、体感、心理、对白、动作都要有，写成完整的一个场景，不要为了凑字数重复。' }
 };
 
 export const TONE_PRESETS = [

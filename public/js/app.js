@@ -73,6 +73,7 @@ async function boot() {
   state.health = await server.health();
   const cfg = await server.getConfig();
   state.serverCfg = cfg.config || {};
+  if (state.serverCfg.styleSample) localConfig.write({ styleSample: state.serverCfg.styleSample });
 
   const activeId = store.activeId();
   const session = activeId ? store.getSession(activeId) : null;
@@ -781,6 +782,7 @@ async function generate() {
       session: s,
       cursor: s.cursor,
       signal: controller.signal,
+      styleSample: state.serverCfg.styleSample || localConfig.read().styleSample || '',
       onPartial: (blocks) => {
         ui.hideTyping();
         ui.renderStreamingRound(s, blocks);
@@ -1115,6 +1117,12 @@ function openWriting() {
       <div class="tip" style="margin-top:6px" id="w-intensity-text">${esc(cur || '（未设置）')}</div>
     </div>
     <div class="field">
+      <label class="field-label">单轮篇幅<span class="field-hint">觉得写得单薄，就调大这一档</span></label>
+      <div class="chip-row" id="w-length">
+        ${Object.entries(LENGTH_PRESETS).map(([k, v]) => `<button class="chip${(s.setup.lengthHint || '') === v.hint ? ' active' : ''}" data-len="${k}">${esc(v.name)}</button>`).join('')}
+      </div>
+    </div>
+    <div class="field">
       <label class="field-label">写作指令<span class="field-hint">最高优先级，逐条写清楚</span></label>
       <textarea id="w-custom" rows="10">${esc(custom || DEFAULT_CUSTOM_PROMPT)}</textarea>
       <div class="chip-row">
@@ -1129,6 +1137,14 @@ function openWriting() {
     </div>
   `, (modal) => {
     let picked = cur;
+    let pickedLen = s.setup.lengthHint || '';
+    modal.querySelector('#w-length').addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-len]');
+      if (!chip) return;
+      pickedLen = LENGTH_PRESETS[chip.dataset.len].hint;
+      modal.querySelectorAll('#w-length .chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
     modal.querySelector('#w-intensity').addEventListener('click', (e) => {
       const chip = e.target.closest('[data-w]');
       if (!chip) return;
@@ -1161,6 +1177,7 @@ function openWriting() {
     });
     modal.querySelector('#w-save').addEventListener('click', () => {
       s.setup.intensity = picked;
+      if (pickedLen) s.setup.lengthHint = pickedLen;
       s.setup.customPrompt = modal.querySelector('#w-custom').value.trim();
       persist(s);
       ui.closeModal();
@@ -1264,6 +1281,13 @@ async function openSettings() {
       </div>
     </div>
     <div class="field">
+      <label class="field-label">文风样例<span class="field-hint">贴 1-2 段你最满意的原文，模型会向它的写法靠拢</span></label>
+      <textarea id="s-style" rows="6" placeholder="粘贴一段范文（建议 500~2000 字）。只学写法，不会照抄内容。">${esc(local.styleSample || cfg.styleSample || '')}</textarea>
+      <div class="chip-row" style="margin-top:8px">
+        <button class="chip" id="s-style-clear">清空文风样例</button>
+      </div>
+    </div>
+    <div class="field">
       <label class="field-label">跨设备同步<span class="field-hint">所有剧情存在跑 server.js 的那台电脑上</span></label>
       <div class="diag" id="s-sync-state"></div>
       <input id="s-sync-url" type="text" value="${esc(syncCfg.serverUrl || '')}" placeholder="http://192.168.1.14:8787（线上版想连回家里时填）" />
@@ -1352,6 +1376,10 @@ async function openSettings() {
       paintSync();
     });
 
+    modal.querySelector('#s-style-clear').addEventListener('click', () => {
+      modal.querySelector('#s-style').value = '';
+    });
+
     const showResult = (r) => {
       const box = modal.querySelector('#s-result');
       box.innerHTML = `<div class="diag ${r.ok ? 'ok' : 'bad'}">
@@ -1393,6 +1421,7 @@ async function openSettings() {
         baseUrl: f.baseUrl, model: f.model, temperature: f.temperature,
         maxTokens: f.maxTokens, stream: f.stream, jsonMode: f.jsonMode, mode: f.mode
       };
+      patch.styleSample = modal.querySelector('#s-style').value.trim();
       if (f.key) patch.apiKey = f.key;
       localConfig.write(patch);
       if (srv.up) await server.saveConfig(patch);
