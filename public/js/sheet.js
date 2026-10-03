@@ -40,7 +40,7 @@ export const SHEET_SCHEMA = {
 };
 
 export function emptySheet() {
-  const out = { opening: '' };
+  const out = { idea: '', opening: '' };
   for (const [group, fields] of Object.entries(SHEET_SCHEMA)) {
     out[group] = {};
     for (const f of fields) out[group][f.key] = '';
@@ -59,6 +59,7 @@ export function normalizeSheet(raw) {
     }
   }
   if (typeof raw.opening === 'string') base.opening = raw.opening.trim();
+  if (typeof raw.idea === 'string') base.idea = raw.idea.trim();
   return base;
 }
 
@@ -80,9 +81,20 @@ export function sheetToSetupParts(sheet) {
   return {
     userRole: section('我的角色', SHEET_SCHEMA.me, s.me),
     targetRole: them,
-    scenario: section('世界与剧情', SHEET_SCHEMA.world, s.world),
+    scenario: section('世界与剧情', SHEET_SCHEMA.world, s.world) || s.idea,
+    idea: s.idea,
     opening: s.opening
   };
+}
+
+/** 除了「总设定」以外几乎什么都没填 —— 这种情况该先让 AI 补全 */
+export function sheetOnlyHasIdea(sheet) {
+  const s = normalizeSheet(sheet);
+  let n = (s.opening || '').trim().length;
+  for (const [group, fields] of Object.entries(SHEET_SCHEMA)) {
+    for (const f of fields) n += (s[group][f.key] || '').trim().length;
+  }
+  return s.idea.trim().length > 0 && n < 40;
 }
 
 export function sheetIsEmpty(sheet) {

@@ -426,6 +426,21 @@ button { cursor: pointer; border: none; background: none; }
 .builder-entry .be-desc { font-size: 12px; line-height: 1.7; color: var(--text-dim); }
 
 .sheet-group { margin-bottom: 24px; }
+.sheet-idea {
+  padding: 14px 14px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(216, 180, 120, .32);
+  background: linear-gradient(135deg, rgba(216, 180, 120, .09), rgba(143, 176, 201, .05));
+  margin-bottom: 30px;
+}
+.sheet-idea .sheet-group-title { border-bottom: none; padding-bottom: 2px; margin-bottom: 10px; }
+.sheet-idea textarea {
+  font-size: 15px;
+  line-height: 1.8;
+  background: rgba(0, 0, 0, .25);
+  border-color: rgba(216, 180, 120, .26);
+}
+.sheet-idea textarea:focus { border-color: rgba(216, 180, 120, .6); }
 .sheet-group-title {
   display: block;
   font-size: 13px;

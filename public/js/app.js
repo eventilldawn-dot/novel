@@ -9,6 +9,7 @@ import {
 import { store, newSession } from './store.js';
 import * as syncApi from './sync.js';
 import { SHEET_SCHEMA, emptySheet, normalizeSheet, sheetToSetupParts, sheetIsEmpty } from './sheet.js';
+import { sheetOnlyHasIdea } from './sheet.js';
 import {
   generateRound, server, designSetup, testConnection,
   localConfig, PROVIDERS, probeServer, resolveTransport, designSheet
@@ -350,6 +351,7 @@ function blankSetup() {
     emotions: [...t.emotions],
     intensity: INTENSITY[1].text,
     customPrompt: DEFAULT_CUSTOM_PROMPT,
+    idea: '',
     sheet: emptySheet(),
     autoDesign: true,
     topPanels: t.topPanels.map((p) => ({ ...p })),
@@ -413,6 +415,14 @@ let builderSheet = null;
 let builderOnSave = null;
 let builderFromSetup = false;
 
+function finishBuilderSave(sheet) {
+  $('#screen-builder').classList.remove('open');
+  if (builderOnSave) builderOnSave(sheet);
+  else if (draft) { draft.sheet = sheet; applySheetToDraft(); }
+  if (builderFromSetup) $('#screen-setup').classList.add('open');
+  ui.toast('角色卡已回填到设定（我 / 对方 / 关系 / 世界）。');
+}
+
 function openBuilder({ sheet, onSave, fromSetup }) {
   builderSheet = normalizeSheet(sheet || emptySheet());
   builderOnSave = onSave || null;
@@ -424,6 +434,14 @@ function openBuilder({ sheet, onSave, fromSetup }) {
 }
 
 function renderBuilder() {
+  const ideaBlock = `
+    <div class="sheet-group sheet-idea">
+      <span class="sheet-group-title">〇 · 总设定（先写这个就够了）</span>
+      <div class="sheet-row">
+        <textarea rows="7" data-f="idea" placeholder="把大致构想随手指进来，不用有条理：想写什么关系、什么身份、什么氛围、你希望对方是个什么样的人……&#10;例如：民国上海，我是潜伏在巡捕房的翻译，对方是常来百乐门的日本商人，我要从他嘴里套出运军火的时间表。两个人都在试探，谁先松口谁就输。">${esc(builderSheet.idea || '')}</textarea>
+      </div>
+      <div class="field-tip">写完点右上角 <b>✨ AI 补全</b>，它会自动拆到下面每一个字段里（人设、关系、世界观、开场）。下面的格子空着就行，也可以先填几个关键词再补。</div>
+    </div>`;
   const groups = SHEET_GROUPS.map((g) => {
     const fields = SHEET_SCHEMA[g.key].map((f) => `
       <div class="sheet-row">
@@ -440,12 +458,13 @@ function renderBuilder() {
         <textarea rows="2" data-f="opening" placeholder="例：百乐门二楼包厢，爵士乐刚换到第二支曲子。">${esc(builderSheet.opening || '')}</textarea>
       </div>
     </div>`;
-  $('#builder-groups').innerHTML = groups + opening;
+  $('#builder-groups').innerHTML = ideaBlock + groups + opening;
 }
 
 function readBuilder() {
   $$('#builder-groups [data-f]').forEach((el) => {
     const path = el.dataset.f;
+    if (path === 'idea') { builderSheet.idea = el.value.trim(); return; }
     if (path === 'opening') { builderSheet.opening = el.value.trim(); return; }
     const [group, key] = path.split('.');
     if (builderSheet[group]) builderSheet[group][key] = el.value.trim();
@@ -461,7 +480,8 @@ function sheetToReadableText(sheet) {
     return `${g.title}\n${lines}`;
   });
   parts.push(`五 · 开场\n  第一幕从哪一刻开始：${(sheet.opening || '').trim() || '（空）'}`);
-  return parts.join('\n\n');
+  const idea = (sheet.idea || '').trim();
+  return `${idea ? `〇 · 总设定（玩家的原始构想，请以它为准展开，不要偏离）\n${idea}\n\n` : ''}${parts.join('\n\n')}`;
 }
 
 async function builderAiFill() {
@@ -474,7 +494,9 @@ async function builderAiFill() {
   try {
     const res = await designSheet({ rough: sheetToReadableText(builderSheet) });
     if (res.ok) {
+      const keptIdea = builderSheet.idea;      // 总设定要留着，AI 只负责拆解
       builderSheet = res.sheet;
+      builderSheet.idea = keptIdea;
       renderBuilder();
       $('#builder-note').innerHTML = '✅ 已补全。可以再手动改，改完点下面保存。';
     } else {
@@ -494,6 +516,7 @@ function applySheetToDraft() {
   if (parts.targetRole) draft.targetRole = parts.targetRole;
   if (parts.scenario) draft.scenario = parts.scenario;
   if (parts.opening) draft.opening = parts.opening;
+  if (parts.idea) draft.idea = parts.idea;
   fillForm();
 }
 
@@ -636,6 +659,7 @@ function collectSetup() {
     emotions: draft.emotions.length ? draft.emotions : ['好感度', '愉悦度', '羞耻度', '痛苦', '沉溺'],
     intensity: draft.intensity,
     customPrompt: draft.customPrompt,
+    idea: draft.idea || draft.sheet?.idea || '',
     sheet: draft.sheet,
     topPanels: draft.topPanels.map((p) => makePanel(p)),
     bottomPanels: draft.bottomPanels.map((p) => makePanel(p))
@@ -659,14 +683,31 @@ function bindSetup() {
   $('#builder-ai').addEventListener('click', builderAiFill);
   $('#builder-save').addEventListener('click', () => {
     const sheet = readBuilder();
-    $('#screen-builder').classList.remove('open');
-    if (builderOnSave) builderOnSave(sheet);
-    else {
-      draft.sheet = sheet;
-      applySheetToDraft();
+    if (sheetOnlyHasIdea(sheet)) {
+      ui.openModal(`
+        <h3>只填了总设定，要先生成完整人设吗？</h3>
+        <div class="tip">让 AI 把这段构想拆成完整角色卡（外貌、性格、过往、软肋、关系、世界观），后面的剧情会明显更稳、更少跑偏。</div>
+        <div class="row">
+          <button class="cancel" data-close-modal>取消</button>
+          <button class="cancel" id="b-save-only">直接保存</button>
+          <button class="ok" id="b-fill-save">AI 补全并保存</button>
+        </div>
+      `, (modal) => {
+        modal.querySelector('#b-save-only').addEventListener('click', () => {
+          ui.closeModal();
+          finishBuilderSave(sheet);
+        });
+        modal.querySelector('#b-fill-save').addEventListener('click', async () => {
+          ui.closeModal();
+          await builderAiFill();
+          const filled = readBuilder();
+          if (sheetIsEmpty(filled)) return;      // 补全失败，留在工坊里
+          finishBuilderSave(filled);
+        });
+      });
+      return;
     }
-    if (builderFromSetup) $('#screen-setup').classList.add('open');
-    ui.toast('角色卡已回填到设定（我 / 对方 / 关系 / 世界）。');
+    finishBuilderSave(sheet);
   });
   $('#btn-reset-custom').addEventListener('click', () => {
     draft.customPrompt = DEFAULT_CUSTOM_PROMPT;
