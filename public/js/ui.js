@@ -124,12 +124,16 @@ export function roundHTML(round, index, opts = {}) {
 
 export function renderRounds(session, opts = {}) {
   const host = $('#rounds');
+  const stage = $('#stage');
+  const keepTop = stage.scrollTop;
+  const wasAtBottom = stage.scrollHeight - stage.scrollTop - stage.clientHeight < 90;
   const visible = session.rounds.slice(0, session.cursor + 1);
   if (!visible.length && !opts.placeholder) {
     host.innerHTML = `<div class="empty-state">
       <h2>剧情还没有开始</h2>
       <p>写下你的第一句行动，导演会立刻为这一幕开场。</p>
     </div>`;
+    $('#jump-bottom') && setJumpButton(false);
     return;
   }
   host.innerHTML = visible.map((r, i) => roundHTML(r, i, {
@@ -138,6 +142,18 @@ export function renderRounds(session, opts = {}) {
     interactive: opts.interactive !== false,
     futureCount: opts.futureCount || 0
   })).join('');
+  // 重绘后把阅读位置还回去：正在往上翻的人不该被弹走
+  if (!wasAtBottom) stage.scrollTop = keepTop;
+}
+
+/** 生成中把输入区锁住（不整体重绘，避免画面跳动） */
+export function lockComposer(lock) {
+  const composer = $('[data-composer]');
+  if (!composer) return;
+  composer.classList.toggle('locked', Boolean(lock));
+  composer.querySelectorAll('.option-card, textarea, .tool-btn').forEach((el) => { el.disabled = Boolean(lock); });
+  const send = composer.querySelector('[data-send]');
+  if (send) send.disabled = false;   // 生成中保留「停止」
 }
 
 /** 流式生成时的临时正文（只更新最后一个 round 的 blocks） */
@@ -201,7 +217,8 @@ export function renderTopActions(setup, activeId) {
   const panels = setup.topPanels || [];
   host.innerHTML = panels.map((p) => `
     <button class="mini-btn${activeId === p.id ? ' active' : ''}" data-panel="${esc(p.id)}">${esc(p.label)}</button>
-  `).join('') + `<button class="mini-btn" data-open-settings title="设置">⚙</button>`;
+  `).join('') + `<button class="mini-btn" data-open-writing title="修改本剧的尺度与写作指令">✍ 写作</button>`
+    + `<button class="mini-btn" data-open-settings title="设置">⚙</button>`;
 }
 
 export function renderBottombar(setup, activeId) {

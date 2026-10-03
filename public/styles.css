@@ -342,7 +342,6 @@ button { cursor: pointer; border: none; background: none; }
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  scroll-behavior: smooth;
   padding-bottom: 26px;
 }
 
@@ -525,6 +524,7 @@ button { cursor: pointer; border: none; background: none; }
 
 /* ---------------- 选项 & 输入 ---------------- */
 .composer { margin: 26px 0 8px; }
+.composer.locked { opacity: .55; }
 .options { display: flex; flex-direction: column; gap: 9px; margin-bottom: 12px; }
 
 .option-card {

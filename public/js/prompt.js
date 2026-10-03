@@ -56,6 +56,7 @@ ${setup.opening || '（未指定，请自行写出一个有力的开场）'}
 【单轮篇幅】${lengthHint}
 【内容尺度】${intensity}
 ${adultMode ? '这是一部成年向的虚构作品。请严格按上面这一档尺度直接写：不要回避关键情节，不要用省略号或"此处省略"跳过，不要在正文里跳出剧情做道德提醒或声明。该发生的身体反应、情绪与对白就正面写出来，这是本作品的核心内容。' : ''}
+${setup.customPrompt ? `\n【玩家指定的写作指令 · 最高优先级】下面每一条都必须严格执行，任何其他习惯性做法都要让位给它：\n${setup.customPrompt}\n` : ''}
 
 【情感指标】${emotions}
 情感值范围 0-100 的整数，只随剧情因果变化，不要无理由跳变。上一轮的数值会给你参考。
@@ -68,6 +69,7 @@ ${adultMode ? '这是一部成年向的虚构作品。请严格按上面这一�
 5. options 必须给出三个「方向明显不同」的下一步行动，每条 10-24 字，用动词开头，能让玩家立刻做出判断；三条之间不要只是程度差异。
 6. 玩家可能会无视选项、自己输入行动 —— 你必须在逻辑上无缝承接玩家的输入，绝不跳戏。
 7. panels 的内容要克制：列表 3-5 条、每条不超过 30 字，卡片 3-4 组，文字面板不超过 120 字。整个 JSON 总量控制在 2500 字以内，宁可精炼也不要写长导致被截断。
+8. 这是最重要的一条：你的输出会被程序直接 JSON.parse。**所有字符串里绝对不要出现英文双引号 " 和换行符**；要引台词请用中文引号「」或『』。一个多余的英文引号就会让整轮内容作废。
 
 ${panelBlock(setup.topPanels, '顶部面板')}${panelBlock(setup.bottomPanels, '底部面板')}
 
@@ -237,20 +239,183 @@ export function extractJson(text) {
       depth -= 1;
       if (depth === 0) {
         const slice = raw.slice(start, i + 1);
-        try {
-          return JSON.parse(slice);
-        } catch {
-          return JSON.parse(repair(slice));
-        }
+        return parseLenient(slice);
       }
     }
   }
   // 走到这里说明括号没闭合（多半是被 max_tokens 截断）——尽力抢救已经写出来的部分
-  try {
-    return JSON.parse(repair(raw.slice(start)));
-  } catch {
-    throw new Error('模型输出被截断且无法解析，请把「最大输出 tokens」调大后重试');
+  return parseLenient(raw.slice(start));
+}
+
+/**
+ * 模型常把英文双引号直接写进中文里（他说"好"），这会让 JSON 结构错位。
+ * 规则：字符串内部遇到 " 时，看它后面第一个非空白字符 ——
+ *   是 : , } ] " 或已到结尾 → 合法结尾引号；
+ *   否则 → 判定为内容里的引号，转义掉。
+ */
+function fixInnerQuotes(text) {
+  const structural = new Set([':', ',', '}', ']', '"']);
+  const out = [];
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (esc) { out.push(ch); esc = false; continue; }
+    if (ch === '\\') { out.push(ch); esc = true; continue; }
+    if (ch !== '"') { out.push(ch); continue; }
+    if (!inStr) { inStr = true; out.push(ch); continue; }
+    let j = i + 1;
+    while (j < text.length && /\s/.test(text[j])) j += 1;
+    const next = text[j];
+    if (next === undefined || structural.has(next)) {
+      inStr = false;
+      out.push(ch);
+    } else {
+      out.push('\\"');
+    }
   }
+  return out.join('');
+}
+
+function parseLenient(slice) {
+  try { return JSON.parse(slice); } catch { /* 继续 */ }
+  try { return JSON.parse(repair(slice)); } catch { /* 继续 */ }
+  try { return JSON.parse(repair(fixInnerQuotes(slice))); } catch { /* 继续 */ }
+  try { return JSON.parse(repair(fixInnerQuotes(repair(slice)))); } catch { /* 继续 */ }
+  const err = new Error('JSON 结构损坏');
+  err.kind = 'json';
+  err.raw = slice;
+  throw err;
+}
+
+/* ---------------- 字段级抢救：整体 JSON 坏了也能把正文捞回来 ---------------- */
+
+function skipWs(s, i) {
+  let j = i;
+  while (j < s.length && /\s/.test(s[j])) j += 1;
+  return j;
+}
+
+/** 从 i 处（s[i] 必须是 "）扫出一个 JSON 字符串，返回 [值, 结束下标] */
+function scanString(s, i) {
+  let j = i + 1;
+  let buf = '';
+  while (j < s.length) {
+    const ch = s[j];
+    if (ch === '\\') {
+      const nx = s[j + 1];
+      if (nx === 'n') buf += '\n';
+      else if (nx === 't') buf += '\t';
+      else if (nx === 'r') buf += '';
+      else buf += nx;
+      j += 2;
+      continue;
+    }
+    if (ch === '"') return [buf, j + 1];
+    buf += ch;
+    j += 1;
+  }
+  return [buf, s.length];
+}
+
+/** 从 i 处（s[i] 是 [ 或 {）扫到配对结束 */
+function scanBracket(s, i) {
+  const open = s[i];
+  const close = open === '[' ? ']' : '}';
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for (let j = i; j < s.length; j += 1) {
+    const ch = s[j];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === open) depth += 1;
+    else if (ch === close) {
+      depth -= 1;
+      if (depth === 0) return s.slice(i, j + 1);
+    }
+  }
+  return s.slice(i);
+}
+
+function parseMaybe(text) {
+  try { return JSON.parse(text); } catch { /* 继续 */ }
+  try { return JSON.parse(repair(text)); } catch { /* 继续 */ }
+  try { return JSON.parse(repair(fixInnerQuotes(text))); } catch { return undefined; }
+}
+
+/** 找 "key" 后面的值并尽可能解析出来 */
+function scanValue(src, key) {
+  const patterns = [`"${key}"`, `'${key}'`, `${key}`];
+  for (const pat of patterns) {
+    const idx = src.indexOf(pat);
+    if (idx < 0) continue;
+    let i = skipWs(src, idx + pat.length);
+    if (src[i] !== ':') continue;
+    i = skipWs(src, i + 1);
+    const ch = src[i];
+    if (ch === undefined) return undefined;
+    if (ch === '"') return scanString(src, i)[0];
+    if (ch === '[' || ch === '{') {
+      const seg = scanBracket(src, i);
+      const parsed = parseMaybe(seg);
+      if (parsed !== undefined) return parsed;
+      // 数组解析不出来就退化成"逐个抽字符串"
+      if (ch === '[') {
+        const items = [];
+        let j = i + 1;
+        while (j < src.length && src[j] !== ']') {
+          if (src[j] === '"') {
+            const [v, end] = scanString(src, j);
+            items.push(v);
+            j = end;
+          } else if (src[j] === '{') {
+            const objSeg = scanBracket(src, j);
+            const obj = parseMaybe(objSeg);
+            if (obj && typeof obj === 'object') items.push(obj);
+            j += objSeg.length;
+          } else j += 1;
+        }
+        return items;
+      }
+      return undefined;
+    }
+    // 数字 / true / false / null
+    const m = /^(-?\d+(?:\.\d+)?|true|false|null)/.exec(src.slice(i));
+    if (m) return parseMaybe(m[1]);
+  }
+  return undefined;
+}
+
+export function salvageRoundFromText(text, session) {
+  const src = String(text || '');
+  const round = {
+    scene: {}, memory: '', emotions: {}, blocks: [], options: [], panels: {}
+  };
+  for (const key of ['act', 'location', 'time', 'phase']) {
+    const v = scanValue(src, key);
+    if (typeof v === 'string' && v) round.scene[key] = v;
+  }
+  const mem = scanValue(src, 'memory');
+  if (typeof mem === 'string') round.memory = mem;
+  round.blocks = partialBlocks(src);
+  round.options = (scanValue(src, 'options') || []).map((o) => String(o)).filter(Boolean);
+
+  const emo = scanValue(src, 'emotions');
+  if (emo && typeof emo === 'object') {
+    for (const [k, v] of Object.entries(emo)) round.emotions[k] = Number(v) || 0;
+  }
+
+  const defs = session
+    ? [...(session.setup.topPanels || []), ...(session.setup.bottomPanels || [])]
+    : [];
+  for (const def of defs) {
+    const v = scanValue(src, def.id);
+    if (v !== undefined) round.panels[def.id] = v;
+  }
+  return round;
 }
 
 function repair(slice) {

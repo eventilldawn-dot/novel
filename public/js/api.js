@@ -10,7 +10,7 @@
 
 import {
   buildMessages, buildDesignerMessages, extractJson, normalizeRound,
-  normalizeDesign, partialBlocks
+  normalizeDesign, partialBlocks, salvageRoundFromText
 } from './prompt.js';
 import { localRound } from './engine.js';
 import { syncConfig } from './sync.js';
@@ -306,10 +306,20 @@ export async function generateRound({ session, cursor, onPartial, signal }) {
 
   try {
     const raw = await request({ messages: buildMessages(session, cursor), stream: true, json: true, onPartial, signal });
-    const parsed = extractJson(raw);
+    let parsed;
+    let salvaged = false;
+    try {
+      parsed = extractJson(raw);
+    } catch (err) {
+      if (!err || !err.raw) throw err;
+      // JSON 结构坏了（模型多写了引号/被截断）—— 字段级抢救，尽量别浪费这一轮
+      parsed = salvageRoundFromText(err.raw, session);
+      salvaged = true;
+    }
     const round = makeRound(session, parsed, prevEmotions, 'llm');
     if (!round.blocks.length) throw Object.assign(new Error('模型没有返回正文'), { kind: 'empty' });
-    return { round, engine: 'llm' };
+    if (salvaged) round.repaired = true;
+    return { round, engine: 'llm', repaired: salvaged };
   } catch (err) {
     if (err.name === 'AbortError') throw err;
     const round = await localRound({
