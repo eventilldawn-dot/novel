@@ -8,9 +8,10 @@ import {
 } from './presets.js';
 import { store, newSession } from './store.js';
 import * as syncApi from './sync.js';
+import { SHEET_SCHEMA, emptySheet, normalizeSheet, sheetToSetupParts, sheetIsEmpty } from './sheet.js';
 import {
   generateRound, server, designSetup, testConnection,
-  localConfig, PROVIDERS, probeServer, resolveTransport
+  localConfig, PROVIDERS, probeServer, resolveTransport, designSheet
 } from './api.js';
 import * as ui from './ui.js';
 
@@ -34,7 +35,10 @@ const DEFAULT_CUSTOM_PROMPT = `1. 严格记住人设与世界观设定，不要�
 5. 允许主动推进剧情，但不要过度跳跃时间线。
 6. 减少血液、流泪这类描写。
 7. 在保留动作与语言描写的基础上，增加环境描写。
-8. 无需避讳违禁词；涉及性爱场面时详细描写，允许描写性器官，允许符合人设的粗俗语。`;
+8. 无需避讳违禁词；涉及性爱场面时详细描写，允许描写性器官，允许符合人设的粗俗语。
+9. 不要引入与当前场景无关的物品、比喻或象征，不要凭空出现此前没提过的东西。
+10. 专注写「当下短时间内」发生的事，每次回复话题专一，不要跳脱。
+11. 心理描写不要重复已经说过的内容。`;
 
 const state = {
   session: null,
@@ -331,6 +335,7 @@ function blankSetup() {
     emotions: [...t.emotions],
     intensity: INTENSITY[1].text,
     customPrompt: DEFAULT_CUSTOM_PROMPT,
+    sheet: emptySheet(),
     autoDesign: true,
     topPanels: t.topPanels.map((p) => ({ ...p })),
     bottomPanels: t.bottomPanels.map((p) => ({ ...p }))
@@ -378,6 +383,103 @@ async function runAutoDesign({ silent } = {}) {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = old; }
   }
+}
+
+/* ---------------- 人设工坊 ---------------- */
+
+const SHEET_GROUPS = [
+  { key: 'me', title: '一 · 我的角色（玩家扮演）' },
+  { key: 'them', title: '二 · 核心角色（AI 演的那位）' },
+  { key: 'relation', title: '三 · 两人的关系' },
+  { key: 'world', title: '四 · 世界与剧情' }
+];
+
+let builderSheet = null;
+let builderOnSave = null;
+let builderFromSetup = false;
+
+function openBuilder({ sheet, onSave, fromSetup }) {
+  builderSheet = normalizeSheet(sheet || emptySheet());
+  builderOnSave = onSave || null;
+  builderFromSetup = Boolean(fromSetup);
+  renderBuilder();
+  $('#builder-note').innerHTML = '把想到的填进去就行，空着的交给 <b>✨ AI 补全</b>。字段写得越具体，模型越不会自己编细节、越不容易跑偏。';
+  $('#screen-builder').classList.add('open');
+  if (builderFromSetup) $('#screen-setup').classList.remove('open');
+}
+
+function renderBuilder() {
+  const groups = SHEET_GROUPS.map((g) => {
+    const fields = SHEET_SCHEMA[g.key].map((f) => `
+      <div class="sheet-row">
+        <span>${esc(f.label)}</span>
+        <textarea rows="${f.rows}" data-f="${g.key}.${f.key}" placeholder="${esc(f.ph)}">${esc(builderSheet[g.key][f.key] || '')}</textarea>
+      </div>`).join('');
+    return `<div class="sheet-group" data-group="${g.key}"><span class="sheet-group-title">${esc(g.title)}</span>${fields}</div>`;
+  }).join('');
+  const opening = `
+    <div class="sheet-group">
+      <span class="sheet-group-title">五 · 开场</span>
+      <div class="sheet-row">
+        <span>第一幕从哪一刻开始</span>
+        <textarea rows="2" data-f="opening" placeholder="例：百乐门二楼包厢，爵士乐刚换到第二支曲子。">${esc(builderSheet.opening || '')}</textarea>
+      </div>
+    </div>`;
+  $('#builder-groups').innerHTML = groups + opening;
+}
+
+function readBuilder() {
+  $$('#builder-groups [data-f]').forEach((el) => {
+    const path = el.dataset.f;
+    if (path === 'opening') { builderSheet.opening = el.value.trim(); return; }
+    const [group, key] = path.split('.');
+    if (builderSheet[group]) builderSheet[group][key] = el.value.trim();
+  });
+  return builderSheet;
+}
+
+function sheetToReadableText(sheet) {
+  const parts = SHEET_GROUPS.map((g) => {
+    const lines = SHEET_SCHEMA[g.key]
+      .map((f) => `  ${f.label}：${(sheet[g.key][f.key] || '').trim() || '（空）'}`)
+      .join('\n');
+    return `${g.title}\n${lines}`;
+  });
+  parts.push(`五 · 开场\n  第一幕从哪一刻开始：${(sheet.opening || '').trim() || '（空）'}`);
+  return parts.join('\n\n');
+}
+
+async function builderAiFill() {
+  readBuilder();
+  const btn = $('#builder-ai');
+  const old = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '正在补全…';
+  $('#builder-note').innerHTML = 'AI 正在把你的要点扩写成完整角色卡，大概需要 20~60 秒…';
+  try {
+    const res = await designSheet({ rough: sheetToReadableText(builderSheet) });
+    if (res.ok) {
+      builderSheet = res.sheet;
+      renderBuilder();
+      $('#builder-note').innerHTML = '✅ 已补全。可以再手动改，改完点下面保存。';
+    } else {
+      $('#builder-note').innerHTML = `补全失败：${esc(res.error)}${res.hint ? `<br>建议：${esc(res.hint)}` : ''}`;
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+/** 把角色卡拆开回填到设定页的三个字段 */
+function applySheetToDraft() {
+  if (!draft) return;
+  const parts = sheetToSetupParts(draft.sheet);
+  if (parts.userRole) draft.userRole = parts.userRole;
+  if (parts.targetRole) draft.targetRole = parts.targetRole;
+  if (parts.scenario) draft.scenario = parts.scenario;
+  if (parts.opening) draft.opening = parts.opening;
+  fillForm();
 }
 
 function openSetup(templateId) {
@@ -519,6 +621,7 @@ function collectSetup() {
     emotions: draft.emotions.length ? draft.emotions : ['好感度', '愉悦度', '羞耻度', '痛苦', '沉溺'],
     intensity: draft.intensity,
     customPrompt: draft.customPrompt,
+    sheet: draft.sheet,
     topPanels: draft.topPanels.map((p) => makePanel(p)),
     bottomPanels: draft.bottomPanels.map((p) => makePanel(p))
   };
@@ -526,6 +629,30 @@ function collectSetup() {
 
 function bindSetup() {
   $('#btn-autodesign').addEventListener('click', () => runAutoDesign());
+  $('#btn-builder').addEventListener('click', () => {
+    readForm();
+    openBuilder({
+      sheet: draft.sheet,
+      fromSetup: true,
+      onSave: (sheet) => { draft.sheet = sheet; applySheetToDraft(); }
+    });
+  });
+  $('#builder-close').addEventListener('click', () => {
+    $('#screen-builder').classList.remove('open');
+    if (builderFromSetup) $('#screen-setup').classList.add('open');
+  });
+  $('#builder-ai').addEventListener('click', builderAiFill);
+  $('#builder-save').addEventListener('click', () => {
+    const sheet = readBuilder();
+    $('#screen-builder').classList.remove('open');
+    if (builderOnSave) builderOnSave(sheet);
+    else {
+      draft.sheet = sheet;
+      applySheetToDraft();
+    }
+    if (builderFromSetup) $('#screen-setup').classList.add('open');
+    ui.toast('角色卡已回填到设定（我 / 对方 / 关系 / 世界）。');
+  });
   $('#btn-reset-custom').addEventListener('click', () => {
     draft.customPrompt = DEFAULT_CUSTOM_PROMPT;
     $('#f-custom').value = DEFAULT_CUSTOM_PROMPT;
@@ -947,6 +1074,7 @@ function openWriting() {
       <textarea id="w-custom" rows="10">${esc(custom || DEFAULT_CUSTOM_PROMPT)}</textarea>
       <div class="chip-row">
         <button class="chip" id="w-reset">恢复默认</button>
+        <button class="chip" id="w-builder">✍ 打开人设工坊</button>
       </div>
     </div>
     <div class="tip">保存后，下一轮生成就会用新设定。<b>去掉"避免直白"那类字眼、尺度选「无限制」，能明显减少模型自己往回收。</b></div>
@@ -968,6 +1096,23 @@ function openWriting() {
     });
     modal.querySelector('#w-reset').addEventListener('click', () => {
       modal.querySelector('#w-custom').value = DEFAULT_CUSTOM_PROMPT;
+    });
+    modal.querySelector('#w-builder').addEventListener('click', () => {
+      ui.closeModal();
+      openBuilder({
+        sheet: s.setup.sheet,
+        fromSetup: false,
+        onSave: (sheet) => {
+          s.setup.sheet = sheet;
+          const parts = sheetToSetupParts(sheet);
+          if (parts.userRole) s.setup.userRole = parts.userRole;
+          if (parts.targetRole) s.setup.targetRole = parts.targetRole;
+          if (parts.scenario) s.setup.scenario = parts.scenario;
+          if (parts.opening) s.setup.opening = parts.opening;
+          persist(s);
+          ui.toast('角色卡已保存，下一轮开始生效。');
+        }
+      });
     });
     modal.querySelector('#w-save').addEventListener('click', () => {
       s.setup.intensity = picked;

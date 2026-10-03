@@ -22,6 +22,7 @@ const SHELL = [
   './js/engine.js',
   './js/presets.js',
   './js/prompt.js',
+  './js/sheet.js',
   './js/store.js',
   './js/sync.js',
   './js/ui.js'

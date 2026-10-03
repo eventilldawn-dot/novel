@@ -81,6 +81,29 @@
   </div>
 
   <!-- ============ 开场设定页 ============ -->
+  <section class="screen" id="screen-builder">
+    <div class="setup-wrap">
+      <header class="setup-head">
+        <div class="setup-brand">人设工坊<span>·</span><em>先立人，再开戏</em></div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="ghost-btn" id="builder-ai" style="flex:none">✨ AI 补全</button>
+          <button class="icon-btn" id="builder-close" title="返回">✕</button>
+        </div>
+      </header>
+
+      <div class="setup-scroll">
+        <div class="setup-note" id="builder-note">
+          把想到的填进去就行，其余交给 <b>✨ AI 补全</b>。字段越具体，模型越不会自己编细节、跑偏。
+        </div>
+        <div id="builder-groups"></div>
+      </div>
+
+      <footer class="setup-foot">
+        <button class="primary-btn" id="builder-save">保存并回填到设定 →</button>
+      </footer>
+    </div>
+  </section>
+
   <section class="screen" id="screen-setup">
     <div class="setup-wrap">
       <header class="setup-head">
@@ -104,6 +127,11 @@
             <button class="chip active" id="chk-autodesign" type="button">开始剧情时，自动按剧情配置按钮与情感条</button>
           </div>
         </div>
+
+        <button class="builder-entry" id="btn-builder" type="button">
+          <span class="be-title">✍ 人设工坊</span>
+          <span class="be-desc">开戏之前，先把「我 / 对方 / 世界」立起来 —— 人设立得越完整，模型越不容易跑偏、越不会自己想一出是一出。可以只写几行，剩下的交给 AI 补全。</span>
+        </button>
 
         <div class="field">
           <label class="field-label" for="f-scenario">人设剧情指令<span class="field-hint">世界观、主线、规则、节奏，写得越具体，导演越准</span></label>

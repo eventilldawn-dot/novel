@@ -10,8 +10,9 @@
 
 import {
   buildMessages, buildDesignerMessages, extractJson, normalizeRound,
-  normalizeDesign, partialBlocks, salvageRoundFromText
+  normalizeDesign, partialBlocks, salvageRoundFromText, buildSheetMessages
 } from './prompt.js';
+import { normalizeSheet } from './sheet.js';
 import { localRound } from './engine.js';
 import { syncConfig } from './sync.js';
 
@@ -355,5 +356,15 @@ export async function designSetup({ draft, localFallback }) {
       error: err.message,
       hint: err.hint || ''
     };
+  }
+}
+
+/** 人设工坊：把粗略要点扩写成完整角色卡 */
+export async function designSheet({ rough }) {
+  try {
+    const raw = await request({ messages: buildSheetMessages(rough), stream: false, json: true });
+    return { ok: true, sheet: normalizeSheet(extractJson(raw)) };
+  } catch (err) {
+    return { ok: false, error: err.message, hint: err.hint || '' };
   }
 }

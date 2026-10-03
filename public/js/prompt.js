@@ -2,6 +2,8 @@
  * prompt.js — 提示词构建 + 模型输出解析（含流式增量解析）
  */
 
+import { SHEET_SCHEMA, normalizeSheet } from './sheet.js';
+
 const JSON_SPEC = `{
   "scene": {
     "act": "第N幕 · 幕名（4-8字）",
@@ -32,11 +34,59 @@ function panelBlock(panels, scope) {
   return `\n【${scope}】下面是固定面板，必须每一项都填：\n${lines.join('\n')}\n`;
 }
 
+/** 把角色卡渲染成提示词里的一段权威设定 */
+export function buildSheetBlock(sheet) {
+  if (!sheet) return '';
+  const s = normalizeSheet(sheet);
+  const parts = [];
+  const dump = (title, group, fields) => {
+    const lines = fields
+      .map((f) => [f.label, (group[f.key] || '').trim()])
+      .filter((pair) => pair[1])
+      .map((pair) => `${pair[0]}：${pair[1]}`);
+    if (lines.length) parts.push(`【${title}】\n${lines.join('\n')}`);
+  };
+  dump('玩家扮演的角色', s.me, SHEET_SCHEMA.me);
+  dump('核心角色（你负责演他）', s.them, SHEET_SCHEMA.them);
+  dump('两人的关系', s.relation, SHEET_SCHEMA.relation);
+  dump('世界与剧情', s.world, SHEET_SCHEMA.world);
+  if (s.opening) parts.push(`【开场】\n${s.opening}`);
+  if (!parts.length) return '';
+  return `【角色卡 · 本作的权威设定，必须严格遵守】\n下面每一条都是玩家亲自定下的。不得遗忘、混淆、简化或擅自增改；人物的说话方式、习惯动作、软肋与关系都必须与它一致。写每一轮之前先回想一遍。\n\n${parts.join('\n\n')}`;
+}
+
+/** 让模型把粗略要点扩写成一份完整的角色卡 */
+export function buildSheetMessages(rough) {
+  const keys = Object.entries(SHEET_SCHEMA)
+    .map(([group, fields]) => `  "${group}": { ${fields.map((f) => `"${f.key}": "${f.label}"`).join(', ')} }`)
+    .join(',\n');
+  const system = `你是角色设定师。玩家会给你一些粗略的点子，你要把它补全成一份具体、自洽、可以直接开演的角色卡。
+
+要求：
+1. 每个字段 20-80 字，写具体的细节（尺寸、物件、口癖、明确的欲望与恐惧），不要写空泛的形容词堆砌。
+2. 只写「设定」，不要写剧情经过，不要写成小说段落。
+3. 各字段之间必须自洽：外貌、过往、软肋要能互相解释。
+4. 玩家已经写了的内容要保留原意，只做扩写和补全，不要推翻。
+5. 全部用中文；字符串里不要出现英文双引号，需要引用时用「」。
+
+只输出 JSON，第一个字符必须是 {。结构：
+{
+${keys},
+  "opening": "第一幕从哪一刻开始，一到两句"
+}`;
+  const roughText = typeof rough === 'string' ? rough : JSON.stringify(rough, null, 1);
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: `以下是我现在有的点子（可能很粗糙，也可能只有一部分）：\n\n${roughText}\n\n请补全成完整的角色卡 JSON。` }
+  ];
+}
+
 export function buildSystemPrompt(setup) {
   const emotions = (setup.emotions || []).join('、');
   const lengthHint = setup.lengthHint || '控制在 350-500 字，有场景与对白。';
   const intensity = setup.intensity || '成人向的文学化描写，重心理与氛围，避免直白的器官词与粗俗表达';
   const adultMode = !/全年龄/.test(intensity);
+  const sheetBlock = buildSheetBlock(setup.sheet);
   return `你是「Novel」的导演引擎 —— 一位功力深厚的中文互动小说作者，负责推进一部沉浸式文字剧情。
 
 【世界观与剧情设定】
@@ -50,6 +100,7 @@ ${setup.targetRole || '（未指定，按剧情合理设定）'}
 
 【开场状态】
 ${setup.opening || '（未指定，请自行写出一个有力的开场）'}
+${sheetBlock ? `\n${sheetBlock}\n` : ''}
 
 【叙事风格】${setup.tone || '沉浸式小说'}
 【叙事视角】${setup.pov || '第二人称（你用……）'}
