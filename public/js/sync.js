@@ -29,6 +29,8 @@ const state = {
   count: 0
 };
 
+let lastProbeReason = '';
+
 export function syncState() {
   return { ...state, serverUrl: syncConfig.read().serverUrl || '' };
 }
@@ -43,10 +45,16 @@ function headers() {
 async function probe(base) {
   try {
     const res = await fetch(`${base}/api/health`, { headers: headers(), cache: 'no-store' });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      lastProbeReason = res.status === 403 ? '口令不对' : `HTTP ${res.status}`;
+      return null;
+    }
     const data = await res.json();
-    return data?.ok ? data : null;
-  } catch {
+    if (!data?.ok) { lastProbeReason = '返回异常'; return null; }
+    return data;
+  } catch (err) {
+    // 跨域被拦、DNS 失败、证书问题都会走到这里
+    lastProbeReason = err?.message || '网络错误';
     return null;
   }
 }
@@ -71,6 +79,7 @@ export async function initSync() {
       return true;
     }
     state.error = `连不上 ${base}`;
+    state.errorDetail = lastProbeReason;
   }
   state.available = false;
   state.kind = 'local';

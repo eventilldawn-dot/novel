@@ -1017,7 +1017,7 @@ async function openSettings() {
     const paintSync = () => {
       const s = syncApi.syncState();
       const text = s.error
-        ? `✕ ${s.error}`
+        ? `✕ ${s.error}${s.errorDetail ? `（${s.errorDetail}）` : ''}`
         : s.kind === 'server'
           ? `✓ 已连上本机服务。所有剧情保存在 ${location.origin} 这台电脑的 data/sessions.json 里，用同一个地址打开的每台设备共用这一份。`
           : s.kind === 'remote'

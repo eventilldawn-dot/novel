@@ -201,9 +201,8 @@ function isCrossOrigin(req) {
   if (!origin) return false;
   try {
     const o = new URL(origin);
-    const host = String(req.headers.host || '').split(':')[0].toLowerCase();
-    if (o.hostname.toLowerCase() === host) return false;
-    if (o.hostname === 'localhost' || o.hostname === '127.0.0.1') return false;
+    const reqHost = String(req.headers.host || '').toLowerCase();
+    if (o.host.toLowerCase() === reqHost) return false;   // 同源（含端口）
   } catch {
     return true;
   }
