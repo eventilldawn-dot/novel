@@ -4,7 +4,9 @@
 
 > 界面与交互参考 nuvva.ai 的移动端对话形态：顶部是分幕信息 + 实时情感条，中间是正文，底部是一排可点开的实时反馈面板。
 
-> **在线版**：项目是纯前端，可以直接发布到 GitHub Pages / Netlify / Cloudflare Pages，见 [DEPLOY.md](./DEPLOY.md)。线上版用浏览器直连模型（DeepSeek 支持跨域），Key 只存在访问者自己的浏览器里。
+> **在线版**：<https://eventilldawn-dot.github.io/novel/>
+>
+> 项目是纯前端，可以直接发布到 GitHub Pages / Netlify / Cloudflare Pages，见 [DEPLOY.md](./DEPLOY.md)。线上版用浏览器直连模型（DeepSeek 支持跨域），Key 只存在访问者自己的浏览器里，不会上传到任何服务器。
 
 ---
 

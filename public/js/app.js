@@ -805,7 +805,7 @@ async function openSettings() {
       </div>
       <div class="field">
         <label class="field-label">最大输出 tokens</label>
-        <input id="s-max" type="text" value="${esc(String(local.maxTokens ?? cfg.maxTokens ?? 3600))}" />
+        <input id="s-max" type="text" value="${esc(String(local.maxTokens ?? cfg.maxTokens ?? 8000))}" />
       </div>
     </div>
     <div class="chip-row">
@@ -836,7 +836,7 @@ async function openSettings() {
       baseUrl: modal.querySelector('#s-base').value.trim(),
       model: modal.querySelector('#s-model').value.trim(),
       temperature: Number(modal.querySelector('#s-temp').value) || 1.1,
-      maxTokens: Number(modal.querySelector('#s-max').value) || 3600,
+      maxTokens: Number(modal.querySelector('#s-max').value) || 8000,
       stream: modal.querySelector('#s-stream').classList.contains('active'),
       jsonMode: modal.querySelector('#s-json').classList.contains('active'),
       mode: modal.querySelector('#s-modes .active')?.dataset.mode || 'auto',
