@@ -48,6 +48,7 @@ async function boot() {
   // 用带令牌的地址打开时（例如内网穿透的公网地址 ?token=xxx），先把它记下来
   const urlToken = new URLSearchParams(location.search).get('token');
   if (urlToken) syncApi.syncConfig.write({ token: urlToken.trim() });
+  registerServiceWorker();
   bindGlobal();
   bindSetup();
   await bootSync();
@@ -66,6 +67,15 @@ async function boot() {
   }
   updateEngineBadge();
   refreshEngineBanner();
+}
+
+/** 注册 Service Worker：让这个网址在电脑没开机时也能打开（离线可用） */
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator) || !window.isSecureContext) return;
+  navigator.serviceWorker.register('./sw.js').then((reg) => {
+    // 每次打开顺手检查一次更新，但不要打断当前使用
+    reg.update?.().catch(() => {});
+  }).catch(() => { /* http 局域网地址不支持，忽略即可 */ });
 }
 
 /* ---------------- 跨设备同步 ---------------- */
@@ -1110,11 +1120,18 @@ async function openSettings() {
 }
 
 function openData() {
+  const synced = state.sync.available;
+  const serverUrl = state.sync.kind === 'remote' ? state.sync.serverUrl : location.origin;
   ui.openModal(`
     <h3>数据管理</h3>
     <div class="kvline"><span>剧情档案</span><span>${store.listSessions().length} 条</span></div>
-    <div class="kvline"><span>存储位置</span><span>本机浏览器 localStorage</span></div>
-    <div class="tip">导出的 JSON 包含全部剧情、选项与面板快照，可以在另一台设备导入继续。</div>
+    <div class="kvline"><span>存储位置</span><span>${synced ? esc(serverUrl) + ' 的 data/sessions.json' : '本机浏览器 localStorage'}</span></div>
+    <div class="tip">导出的 JSON 包含全部剧情、选项与面板快照，可以在另一台设备导入继续。<br>
+      ${synced ? '当前已连上服务，会自动同步。' : '当前没有连上服务，数据只在这台设备上 —— 想搬去另一台设备，用下面的「复制 / 粘贴」。'}</div>
+    <div class="row">
+      <button class="cancel" id="d-copy">复制全部到剪贴板</button>
+      <button class="cancel" id="d-paste">从剪贴板导入</button>
+    </div>
     <div class="row">
       <button class="cancel" id="d-import">导入</button>
       <button class="ok" id="d-export">导出</button>
@@ -1123,6 +1140,28 @@ function openData() {
       <button class="danger" id="d-clear" style="flex:1">清空全部剧情</button>
     </div>
   `, (modal) => {
+    modal.querySelector('#d-copy').addEventListener('click', async () => {
+      const text = JSON.stringify(store.exportAll());
+      try {
+        await navigator.clipboard.writeText(text);
+        ui.toast(`已复制 ${store.listSessions().length} 部剧情（${Math.round(text.length / 1024)}KB），发给另一台设备后点「从剪贴板导入」。`);
+      } catch {
+        ui.toast('复制失败，请改用「导出」下载文件。', 'warn');
+      }
+    });
+    modal.querySelector('#d-paste').addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        const res = store.importAll(JSON.parse(text));
+        renderSessionList();
+        if (state.session) enterSession(state.session);
+        ui.closeModal();
+        ui.toast(`导入完成，新增 ${res.added} 条，共 ${res.total} 条。`);
+        if (state.sync.available) runFullSync();
+      } catch (err) {
+        ui.toast(`导入失败：剪贴板里不是有效的备份内容（${err.message}）`, 'warn');
+      }
+    });
     modal.querySelector('#d-export').addEventListener('click', () => {
       const blob = new Blob([JSON.stringify(store.exportAll(), null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
@@ -1145,6 +1184,7 @@ function openData() {
           renderSessionList();
           ui.closeModal();
           ui.toast(`导入完成，新增 ${res.added} 条，共 ${res.total} 条。`);
+          if (state.sync.available) runFullSync();
         } catch (err) {
           ui.toast(`导入失败：${err.message}`, 'warn');
         }

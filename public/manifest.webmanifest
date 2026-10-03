@@ -1,0 +1,16 @@
+{
+  "name": "Novel · 沉浸式文字剧情",
+  "short_name": "Novel",
+  "description": "AI 导演推进的中文互动剧情：每轮三选一 + 自由输入，可回退分支，界面按钮随剧情自动生成。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#080b10",
+  "theme_color": "#080b10",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
