@@ -16,7 +16,7 @@ import {
 import { looksGarbled, modeOf } from './prompt.js';
 import {
   generateRound, server, designSetup, testConnection,
-  localConfig, PROVIDERS, probeServer, resolveTransport, designSheet
+  localConfig, PROVIDERS, probeServer, resolveTransport, designSheet, generatePanels
 } from './api.js';
 import * as ui from './ui.js';
 
@@ -279,6 +279,44 @@ function persist(session) {
     ui.toast('本机浏览器存不下了（localStorage 已满）。数据仍会同步到电脑上；建议到「⇅ 数据」导出备份，再删掉几部旧剧情。', 'warn');
   }
   queuePush(session);
+}
+
+/* ---- 面板内容后台生成：正文先给玩家看，面板随后补上 ---- */
+const panelJobs = new Map();     // "sessionId:轮次" → 'pending' | 'failed'
+const panelKey = (s, i) => `${s.id}:${i}`;
+
+function panelState(session, index) {
+  if (!session || index < 0) return null;
+  return panelJobs.get(panelKey(session, index)) || null;
+}
+
+async function fillPanelsInBackground(session, index) {
+  const round = session.rounds[index];
+  if (!round) return;
+  const key = panelKey(session, index);
+  panelJobs.set(key, 'pending');
+  if (state.session?.id === session.id && state.session.cursor === index && state.activePanel) {
+    const def = currentPanelDefs().find((p) => p.id === state.activePanel);
+    if (def) ui.openDrawer(def, round.panels?.[def.id], { pending: true });
+  }
+  try {
+    const panels = await generatePanels({ session, cursor: index });
+    round.panels = { ...(round.panels || {}), ...panels };
+    panelJobs.delete(key);
+    persist(session);
+  } catch (err) {
+    panelJobs.set(key, 'failed');
+    if (state.session?.id === session.id && state.session.cursor === index && state.activePanel) {
+      const def = currentPanelDefs().find((p) => p.id === state.activePanel);
+      if (def) ui.openDrawer(def, null, { failed: true });
+    }
+    return;
+  }
+  // 面板回来了：如果正开着，立刻刷新
+  if (state.session?.id === session.id && state.session.cursor === index && state.activePanel) {
+    const def = currentPanelDefs().find((p) => p.id === state.activePanel);
+    if (def) ui.openDrawer(def, round.panels[def.id]);
+  }
 }
 
 function dropSession(id) {
@@ -949,6 +987,7 @@ async function generate() {
     applyPanelUpdates(s, round);
     delete round._rawPanels;          // 调试用的中间字段，不进存储
     persist(s);
+    fillPanelsInBackground(s, round.i);   // 面板丢到后台补，不挡正文
 
     ui.clearTyping();
     ui.renderLastRound(s, { futureCount: 0 });
@@ -1233,7 +1272,18 @@ function openPanel(id) {
   state.activePanel = state.activePanel === id ? null : id;
   renderPanelButtons();
   if (!state.activePanel) { ui.closeDrawer(); return; }
-  ui.openDrawer(def, round.panels?.[id]);
+  const st = panelState(s, s.cursor);
+  const value = round.panels?.[id];
+  ui.openDrawer(def, value, {
+    pending: st === 'pending' && !hasPanelContent(value),
+    failed: st === 'failed' && !hasPanelContent(value)
+  });
+}
+
+function hasPanelContent(value) {
+  if (value === undefined || value === null || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
 }
 
 function gotoRound(index) {
@@ -1554,6 +1604,13 @@ async function openSettings() {
       </div>
     </div>
     <div class="field">
+      <label class="field-label">思考强度<span class="field-hint">v4/flash 是推理模型，"想"的时间占了大头 —— 觉得慢就调低</span></label>
+      <div class="chip-row" id="s-reasoning">
+        ${[['off', '关闭（最快）'], ['low', '低（推荐）'], ['medium', '默认（最慢、文笔最好）']]
+          .map(([k, n]) => `<button class="chip${(local.reasoningEffort || cfg.reasoningEffort || 'low') === k ? ' active' : ''}" data-r="${k}">${esc(n)}</button>`).join('')}
+      </div>
+    </div>
+    <div class="field">
       <label class="field-label">文风样例<span class="field-hint">贴 1-2 段你最满意的原文，模型会向它的写法靠拢</span></label>
       <textarea id="s-style" rows="6" placeholder="粘贴一段范文（建议 500~2000 字）。只学写法，不会照抄内容。">${esc(local.styleSample || cfg.styleSample || '')}</textarea>
       <div class="chip-row" style="margin-top:8px">
@@ -1671,6 +1728,12 @@ async function openSettings() {
       modal.querySelectorAll('#s-default-mode .chip').forEach((c) => c.classList.remove('active'));
       chip.classList.add('active');
     });
+    modal.querySelector('#s-reasoning').addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-r]');
+      if (!chip) return;
+      modal.querySelectorAll('#s-reasoning .chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
 
     modal.querySelector('#s-model-pick').addEventListener('click', (e) => {
       const chip = e.target.closest('[data-pick-model]');
@@ -1722,6 +1785,7 @@ async function openSettings() {
       };
       patch.styleSample = modal.querySelector('#s-style').value.trim();
       patch.defaultMode = modal.querySelector('#s-default-mode .chip.active')?.dataset.dm || 'balanced';
+      patch.reasoningEffort = modal.querySelector('#s-reasoning .chip.active')?.dataset.r || 'low';
       if (looksGarbled(patch.styleSample)) {
         ui.toast('⚠ 这段文风样例看起来是乱码（编码不对），已忽略它 —— 请重新复制一段正常的文本。', 'warn');
       }

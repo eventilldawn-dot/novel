@@ -293,10 +293,14 @@ function renderPanelBody(def, value) {
   return text.split(/\n+/).map((p) => `<p>${esc(p)}</p>`).join('');
 }
 
-export function openDrawer(def, value) {
+export function openDrawer(def, value, opts = {}) {
   const drawer = $('#drawer');
   $('#drawer-title').textContent = def.label;
-  $('#drawer-body').innerHTML = renderPanelBody(def, value);
+  $('#drawer-body').innerHTML = opts.pending
+    ? '<div class="drawer-empty">正在生成这个面板的内容…（正文已经可以看，面板稍后补上）</div>'
+    : opts.failed
+      ? '<div class="drawer-empty">这个面板这一轮没生成成功。<br>点「↻ 换一批走向」或继续下一轮就会重新生成。</div>'
+      : renderPanelBody(def, value);
   const foot = $('#drawer-foot');
   if (def.kind === 'notes') {
     foot.hidden = false;

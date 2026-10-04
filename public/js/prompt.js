@@ -71,6 +71,45 @@ function jsonFields(fields) {
   return fields.map((f) => `"${f.key}": "${f.label}"`).join(', ');
 }
 
+/**
+ * 单独给「面板内容」用的小提示词：很短、很快，用来在正文出来之后再补面板。
+ * 输出只有 panels，不再重复生成正文。
+ */
+export function buildPanelMessages(session, cursor) {
+  const setup = session.setup;
+  const round = session.rounds[cursor];
+  const defs = [...(setup.topPanels || []), ...(setup.bottomPanels || [])];
+  const shape = defs.map((p) => {
+    const kind = p.kind === 'list' ? '字符串数组（3-5 条，每条 8-24 字）'
+      : p.kind === 'kv' ? '对象数组 [{"k":"标题","v":"内容"}]（3-5 项）'
+        : '一段 30-80 字的文字';
+    return `- "${p.id}"（${p.label}）：${p.hint}　→ 格式：${kind}`;
+  }).join('\n');
+
+  const text = blocksToText(round?.blocks || []).slice(0, 1800);
+  const castNames = (normalizeSheet(setup.sheet).cast || [])
+    .map((c) => c.name).filter(Boolean).join('、');
+
+  const system = `你是一部中文互动剧情的导演助手。玩家刚看完一轮剧情，现在只需要你**补这一轮的面板内容**，不要再写正文。
+
+要求：
+1. 内容必须来自这一轮的实际剧情，不要凭空编。
+2. 每个面板都写，但保持精炼：列表 3-5 条、卡片 3-5 项、文字 30-80 字。
+3. 字符串里不要出现英文双引号，需要引用时用「」。
+4. 只输出 JSON，第一个字符必须是 {：
+{ "panels": { ${defs.map((p) => `"${p.id}": 内容`).join(', ')} } }
+
+面板清单：
+${shape}`;
+
+  const user = `【场景】${round?.scene?.act || ''} · ${round?.scene?.location || ''} · ${round?.scene?.time || ''}`
+    + (castNames ? `\n【在场角色】${castNames}` : '')
+    + `\n【这一轮的剧情】\n${text}\n\n`
+    + `请输出这一轮的面板内容 JSON。`;
+
+  return [{ role: 'system', content: system }, { role: 'user', content: user }];
+}
+
 /** 让模型把粗略要点扩写成一份（或几份）完整的角色卡 */
 export function buildSheetMessages(rough, opts = {}) {
   const mode = opts.mode || 'balanced';
@@ -157,7 +196,7 @@ ${setup.customPrompt ? `\n【玩家指定的写作指令 · 最高优先级】�
 8. 这是最重要的一条：你的输出会被程序直接 JSON.parse。**所有字符串里绝对不要出现英文双引号 " 和换行符**；要引台词请用中文引号「」或『』。一个多余的英文引号就会让整轮内容作废。
 9. 正文长度必须达到【单轮篇幅】给的下限。写不够就继续补环境、补动作、补心理细节，**不要提前收尾**，也不要用一句总结把场面草草结束。
 
-${panelBlock(setup.topPanels, '顶部面板')}${panelBlock(setup.bottomPanels, '底部面板')}
+${opts.noPanels ? '\n【本轮不要生成面板】panels 请直接写成一个空对象 {}，程序会另外单独问你。\n' : `${panelBlock(setup.topPanels, '顶部面板')}${panelBlock(setup.bottomPanels, '底部面板')}`}
 
 【顶部按钮是"活"的】玩家随时能点到顶部那排按钮，所以它们要跟着剧情走：
 - 出现新的地点、组织、目标、关键人物时，可以 add 一个真正有用的新按钮；顶部最多 6 个，宁缺毋滥。
@@ -216,15 +255,16 @@ function blocksToText(blocks) {
 export function buildMessages(session, cursor, opts = {}) {
   const setup = session.setup;
   const rounds = session.rounds.slice(0, cursor + 1);
-  const system = buildSystemPrompt(setup, { styleSample: opts.styleSample });
+  const system = buildSystemPrompt(setup, { styleSample: opts.styleSample, noPanels: opts.noPanels });
   const messages = [{ role: 'system', content: system }];
 
   const memory = rounds.length ? rounds[rounds.length - 1].memory : '';
-  const recent = rounds.slice(-4);
+  // 只带最近 2 轮、每轮截断，输入越短开演越快
+  const recent = rounds.slice(-2);
   const transcript = recent
     .map((r) => {
       const action = r.playerAction ? `\n〔玩家的行动〕${r.playerAction}` : '';
-      return `—— 第 ${r.i + 1} 轮（${r.scene.act}｜${r.scene.time} ${r.scene.phase}）——\n${blocksToText(r.blocks)}${action}`;
+      return `—— 第 ${r.i + 1} 轮（${r.scene.act}｜${r.scene.time} ${r.scene.phase}）——\n${blocksToText(r.blocks).slice(0, 900)}${action}`;
     })
     .join('\n\n');
 

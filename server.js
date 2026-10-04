@@ -28,7 +28,8 @@ const DEFAULTS = {
   stream: true,
   jsonMode: true,
   timeoutMs: 180000,
-  syncToken: ''
+  syncToken: '',
+  reasoningEffort: 'low'
 };
 
 let config = { ...DEFAULTS };
@@ -46,7 +47,7 @@ function loadConfig() {
 
 async function saveConfig(patch) {
   const next = { ...config };
-  for (const key of ['baseUrl', 'apiKey', 'model', 'systemExtra', 'syncToken', 'styleSample', 'defaultMode']) {
+  for (const key of ['baseUrl', 'apiKey', 'model', 'systemExtra', 'syncToken', 'styleSample', 'defaultMode', 'reasoningEffort']) {
     if (typeof patch[key] === 'string') next[key] = patch[key].trim();
   }
   for (const key of ['temperature', 'maxTokens', 'timeoutMs']) {
@@ -297,6 +298,7 @@ function publicConfig() {
     jsonMode: config.jsonMode,
     styleSample: config.styleSample || '',
     defaultMode: config.defaultMode || 'balanced',
+    reasoningEffort: config.reasoningEffort || 'low',
     hasKey: Boolean(config.apiKey),
     keyPreview: config.apiKey ? `${config.apiKey.slice(0, 4)}····${config.apiKey.slice(-4)}` : ''
   };
@@ -373,6 +375,9 @@ async function handleChat(req, res) {
       payload.temperature = Number(cfg.temperature) || 1;
       payload.max_tokens = Number(cfg.maxTokens) || DEFAULTS.maxTokens;
     }
+    // 推理模型：思考很吃时间，允许调低甚至关掉
+    if (cfg.reasoningEffort === 'off') payload.thinking = { type: 'disabled' };
+    else if (['low', 'medium', 'high'].includes(cfg.reasoningEffort)) payload.reasoning_effort = cfg.reasoningEffort;
     if (jsonMode) payload.response_format = { type: 'json_object' };
     return payload;
   };
@@ -388,7 +393,7 @@ async function handleChat(req, res) {
       const probe = await upstream.text();
       lastErr = explainError(upstream.status, probe);
       const retryable = upstream.status === 400 &&
-        /response_format|json_object|temperature|max_tokens|unsupported|invalid_request/i.test(probe);
+        /response_format|json_object|temperature|max_tokens|reasoning_effort|thinking|unsupported|invalid_request/i.test(probe);
       if (!retryable) break;
       upstream = null;
     }

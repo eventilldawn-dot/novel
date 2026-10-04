@@ -10,7 +10,7 @@
 
 import {
   buildMessages, buildDesignerMessages, extractJson, normalizeRound,
-  normalizeDesign, partialBlocks, salvageRoundFromText, buildSheetMessages
+  normalizeDesign, partialBlocks, salvageRoundFromText, buildSheetMessages, buildPanelMessages
 } from './prompt.js';
 import { normalizeSheet } from './sheet.js';
 import { localRound } from './engine.js';
@@ -210,6 +210,8 @@ export async function request({ messages, stream = true, json = true, onPartial,
       body.temperature = Number(cfg.temperature ?? 1.1);
       body.max_tokens = Number(cfg.maxTokens ?? 32000);
     }
+    if (cfg.reasoningEffort === 'off') body.thinking = { type: 'disabled' };
+    else if (['low', 'medium', 'high'].includes(cfg.reasoningEffort)) body.reasoning_effort = cfg.reasoningEffort;
     if (withJson) body.response_format = { type: 'json_object' };
     return body;
   };
@@ -239,7 +241,7 @@ export async function request({ messages, stream = true, json = true, onPartial,
     }
     const text = await res.text().catch(() => '');
     last = friendly(res.status, text);
-    const retryable = res.status === 400 && /response_format|json_object|temperature|max_tokens|unsupported|invalid_request/i.test(text);
+    const retryable = res.status === 400 && /response_format|json_object|temperature|max_tokens|reasoning_effort|thinking|unsupported|invalid_request/i.test(text);
     if (!retryable) break;
   }
   throw Object.assign(new Error(last?.detail || '模型调用失败'), {
@@ -305,14 +307,14 @@ function makeRound(session, parsed, prevEmotions, engine) {
   return round;
 }
 
-export async function generateRound({ session, cursor, onPartial, signal, styleSample }) {
+export async function generateRound({ session, cursor, onPartial, signal, styleSample, withPanels = false }) {
   const prevEmotions = cursor >= 0
     ? session.rounds[cursor].emotions
     : Object.fromEntries(session.setup.emotions.map((k) => [k, 0]));
 
   try {
     const raw = await request({
-      messages: buildMessages(session, cursor, { styleSample }),
+      messages: buildMessages(session, cursor, { styleSample, noPanels: !withPanels }),
       stream: true, json: true, onPartial, signal
     });
     let parsed;
@@ -349,6 +351,18 @@ export async function generateRound({ session, cursor, onPartial, signal, styleS
       warning: '未配置模型 API Key，本轮由本地示例引擎生成（文字偏模板化）。'
     };
   }
+}
+
+/** 正文出来之后，再单独（后台）补这一轮的面板内容 —— 让正文先到玩家眼前 */
+export async function generatePanels({ session, cursor, signal }) {
+  const raw = await request({
+    messages: buildPanelMessages(session, cursor),
+    stream: false,
+    json: true,
+    signal
+  });
+  const parsed = extractJson(raw);
+  return parsed.panels && typeof parsed.panels === 'object' ? parsed.panels : {};
 }
 
 /** 让导演按剧情自动配置标题 / 情感指标 / 顶部与底部按钮 */
