@@ -19,7 +19,8 @@ import { syncConfig } from './sync.js';
 const KEY_LLM = 'novel.llm.v1';
 
 export const PROVIDERS = {
-  deepseek: { name: 'DeepSeek（默认）', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  deepseek: { name: 'DeepSeek V4 Pro（默认）', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-pro' },
+  deepseek_flash: { name: 'DeepSeek Flash（快）', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-flash' },
   openai: { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
   moonshot: { name: '月之暗面 Kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
   zhipu: { name: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-plus' },
@@ -207,7 +208,7 @@ export async function request({ messages, stream = true, json = true, onPartial,
     const body = { model: cfg.model || 'deepseek-chat', messages, stream };
     if (!lean) {
       body.temperature = Number(cfg.temperature ?? 1.1);
-      body.max_tokens = Number(cfg.maxTokens ?? 8000);
+      body.max_tokens = Number(cfg.maxTokens ?? 32000);
     }
     if (withJson) body.response_format = { type: 'json_object' };
     return body;

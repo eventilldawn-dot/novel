@@ -10,6 +10,7 @@ import { store, newSession } from './store.js';
 import * as syncApi from './sync.js';
 import { SHEET_SCHEMA, emptySheet, normalizeSheet, sheetToSetupParts, sheetIsEmpty } from './sheet.js';
 import { sheetOnlyHasIdea } from './sheet.js';
+import { looksGarbled } from './prompt.js';
 import {
   generateRound, server, designSetup, testConnection,
   localConfig, PROVIDERS, probeServer, resolveTransport, designSheet
@@ -1364,7 +1365,10 @@ async function openSettings() {
     </div>
     <div class="field">
       <label class="field-label">模型</label>
-      <input id="s-model" type="text" value="${esc(model)}" placeholder="deepseek-chat" />
+      <input id="s-model" type="text" value="${esc(model)}" placeholder="deepseek-v4-pro" />
+      <div class="chip-row" id="s-model-pick" style="margin-top:8px">
+        <button class="chip" id="s-model-fetch">拉取这家服务的可用模型</button>
+      </div>
     </div>
     <div class="field-2col">
       <div class="field">
@@ -1373,7 +1377,7 @@ async function openSettings() {
       </div>
       <div class="field">
         <label class="field-label">最大输出 tokens</label>
-        <input id="s-max" type="text" value="${esc(String(local.maxTokens ?? cfg.maxTokens ?? 8000))}" />
+        <input id="s-max" type="text" value="${esc(String(local.maxTokens ?? cfg.maxTokens ?? 32000))}" />
       </div>
     </div>
     <div class="chip-row">
@@ -1420,7 +1424,7 @@ async function openSettings() {
       baseUrl: modal.querySelector('#s-base').value.trim(),
       model: modal.querySelector('#s-model').value.trim(),
       temperature: Number(modal.querySelector('#s-temp').value) || 1.1,
-      maxTokens: Number(modal.querySelector('#s-max').value) || 8000,
+      maxTokens: Number(modal.querySelector('#s-max').value) || 32000,
       stream: modal.querySelector('#s-stream').classList.contains('active'),
       jsonMode: modal.querySelector('#s-json').classList.contains('active'),
       mode: modal.querySelector('#s-modes .active')?.dataset.mode || 'auto',
@@ -1486,6 +1490,25 @@ async function openSettings() {
       modal.querySelector('#s-style').value = '';
     });
 
+    modal.querySelector('#s-model-fetch').addEventListener('click', async () => {
+      const box = modal.querySelector('#s-model-pick');
+      box.innerHTML = '<span class="chip">拉取中…</span>';
+      const res = await server.models();
+      if (!res.ok || !(res.models || []).length) {
+        box.innerHTML = '<span class="chip">没拉到模型列表（检查 Key / 地址）</span>';
+        return;
+      }
+      box.innerHTML = res.models.slice(0, 24)
+        .map((m) => `<button class="chip" data-pick-model="${esc(m)}">${esc(m)}</button>`).join('');
+    });
+
+    modal.querySelector('#s-model-pick').addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-pick-model]');
+      if (!chip) return;
+      modal.querySelector('#s-model').value = chip.dataset.pickModel;
+      ui.toast('已选 ' + chip.dataset.pickModel + '，点保存生效。');
+    });
+
     const showResult = (r) => {
       const box = modal.querySelector('#s-result');
       box.innerHTML = `<div class="diag ${r.ok ? 'ok' : 'bad'}">
@@ -1528,6 +1551,9 @@ async function openSettings() {
         maxTokens: f.maxTokens, stream: f.stream, jsonMode: f.jsonMode, mode: f.mode
       };
       patch.styleSample = modal.querySelector('#s-style').value.trim();
+      if (looksGarbled(patch.styleSample)) {
+        ui.toast('⚠ 这段文风样例看起来是乱码（编码不对），已忽略它 —— 请重新复制一段正常的文本。', 'warn');
+      }
       if (f.key) patch.apiKey = f.key;
       localConfig.write(patch);
       if (srv.up) await server.saveConfig(patch);

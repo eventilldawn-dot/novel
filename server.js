@@ -24,7 +24,7 @@ const DEFAULTS = {
   apiKey: process.env.NOVEL_API_KEY || '',
   model: process.env.NOVEL_MODEL || 'deepseek-chat',
   temperature: 1.1,
-  maxTokens: 8000,
+  maxTokens: 32000,
   stream: true,
   jsonMode: true,
   timeoutMs: 180000,

@@ -190,17 +190,28 @@ export function renderStreamingRound(session, blocks) {
   host.appendChild(div);
 }
 
+let typingTimer = null;
+
 export function showTyping() {
   const host = $('#rounds');
   if (host.querySelector('[data-typing]')) return;
   const div = document.createElement('div');
   div.dataset.typing = '1';
   div.className = 'typing';
-  div.innerHTML = '<i></i><i></i><i></i>';
+  const t0 = Date.now();
+  const paint = () => {
+    const s = Math.round((Date.now() - t0) / 1000);
+    div.innerHTML = `<i></i><i></i><i></i><span class="typing-text">正在构思… ${s}s${s > 15 ? '（推理模型会先思考一段时间）' : ''}</span>`;
+  };
+  paint();
+  clearInterval(typingTimer);
+  typingTimer = setInterval(paint, 1000);
   host.appendChild(div);
 }
 
 export function hideTyping() {
+  clearInterval(typingTimer);
+  typingTimer = null;
   $$('#rounds [data-typing]').forEach((el) => el.remove());
 }
 
