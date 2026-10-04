@@ -30,7 +30,7 @@ const DEFAULTS = {
   jsonMode: true,
   timeoutMs: 180000,
   syncToken: '',
-  reasoningEffort: 'low'
+  reasoningEffort: 'default'
 };
 
 let config = { ...DEFAULTS };

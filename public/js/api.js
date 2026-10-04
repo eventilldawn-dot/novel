@@ -173,7 +173,7 @@ async function consumeStream(response, onPartial) {
  * 统一请求入口。任何失败都抛出带 hint 的错误。
  * @param {{messages:Array, stream?:boolean, json?:boolean, onPartial?:Function, signal?:AbortSignal}} opts
  */
-export async function request({ messages, stream = true, json = true, onPartial, signal }) {
+export async function request({ messages, stream = true, json = true, onPartial, signal, reasoning }) {
   const t = await resolveTransport();
   if (t.kind === 'none') {
     throw Object.assign(new Error(t.reason === 'no-server' ? '没有可用的模型通道' : '还没有配置 API Key'), { kind: 'no_key' });
@@ -183,7 +183,7 @@ export async function request({ messages, stream = true, json = true, onPartial,
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: apiHeaders(),
-      body: JSON.stringify({ messages, stream }),
+      body: JSON.stringify({ messages, stream, config: reasoning ? { reasoningEffort: reasoning } : undefined }),
       signal
     });
     if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { kind: 'network' });
@@ -202,7 +202,7 @@ export async function request({ messages, stream = true, json = true, onPartial,
   }
 
   // ---- 浏览器直连 ----
-  const cfg = t.cfg || {};
+  const cfg = reasoning ? { ...(t.cfg || {}), reasoningEffort: reasoning } : (t.cfg || {});
   const target = endpointOf(cfg.baseUrl);
   const build = (withJson, lean) => {
     const body = { model: cfg.model || 'deepseek-chat', messages, stream };
@@ -354,11 +354,12 @@ export async function generateRound({ session, cursor, onPartial, signal, styleS
 }
 
 /** 正文出来之后，再单独（后台）补这一轮的面板内容 —— 让正文先到玩家眼前 */
-export async function generatePanels({ session, cursor, signal }) {
+export async function generatePanels({ session, cursor, panels, signal }) {
   const raw = await request({
-    messages: buildPanelMessages(session, cursor),
+    messages: buildPanelMessages(session, cursor, panels),
     stream: false,
     json: true,
+    reasoning: 'off',          // 面板不需要深度思考，快就好
     signal
   });
   const parsed = extractJson(raw);

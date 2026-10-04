@@ -32,18 +32,21 @@ const P = {
   personaCard: {
     id: 'persona_card',
     label: '人设卡',
+    freq: 'rare',
     hint: '用 3-5 行列出当前核心角色的姓名/代号、身份、外观细节、此刻的欲望与软肋。',
     kind: 'kv'
   },
   threads: {
     id: 'threads',
     label: '剧情线索',
+    freq: 'rare',
     hint: '列出目前已经埋下、尚未收束的 3-5 条剧情线索，每条一句话，标注「已触发 / 待引爆」。',
     kind: 'list'
   },
   actMap: {
     id: 'act_map',
     label: '分幕地图',
+    freq: 'rare',
     hint: '用一段话概括整部剧情的三到四幕结构，并标出当前所处幕位与下一步的岔路口。',
     kind: 'text'
   },
@@ -51,108 +54,126 @@ const P = {
   innerVoice: {
     id: 'inner_voice',
     label: '心理活动',
+    freq: 'rare',
     hint: '以「角色名：」开头，写 2-4 句对方此刻真实但说不出口的内心活动，要有生理与情绪的具体细节。',
     kind: 'text'
   },
   bullet: {
     id: 'bullet',
     label: '影片弹幕',
+    freq: 'each',
     hint: '生成 5-8 条观众视角的实时弹幕，格式为 [用户名]: 内容，用户口味偏猎奇、带节奏、有梗。',
     kind: 'list'
   },
   roster: {
     id: 'roster',
     label: '名单记录',
+    freq: 'rare',
     hint: '以列表维护一份「已被记录/已达成」的名册，每条格式 [编号] 代号 — 时间 — 一句状态备注，只增不减。',
     kind: 'list'
   },
   ideas: {
     id: 'ideas',
     label: '自定义思路',
+    freq: 'rare',
     hint: '给出 2-3 条本幕可以走的收尾/加码方向，说明各自的风险与收益，语气像幕后导演笔记。',
     kind: 'notes'
   },
   living: {
     id: 'living',
     label: '生活条件',
+    freq: 'rare',
     hint: '用键值卡片描述主角的现实处境：当前场所 / 日常居所 / 本次收益预估 / 最想改善的一项，数字要克制可信。',
     kind: 'kv'
   },
   relationship: {
     id: 'relationship',
     label: '关系网',
+    freq: 'rare',
     hint: '列出与主角相关的 3-5 个关键人物，每条 [姓名] 关系 — 当前态度（一句话）。',
     kind: 'list'
   },
   mood: {
     id: 'mood',
     label: '情绪波动',
+    freq: 'rare',
     hint: '用 3-5 条短句记录对方情绪从上一轮到此刻的变化轨迹，标出触发变化的那一句台词或动作。',
     kind: 'list'
   },
   rumor: {
     id: 'rumor',
     label: '风闻流言',
+    freq: 'rare',
     hint: '生成 4-6 条当前场景外流传的流言或密报，格式 [来源]: 内容，真假混杂。',
     kind: 'list'
   },
   ledger: {
     id: 'ledger',
     label: '家底账目',
+    freq: 'rare',
     hint: '用键值卡片列出可用资源：银钱 / 人手 / 人脉 / 可动用筹码，并给出一句风险评估。',
     kind: 'kv'
   },
   evidence: {
     id: 'evidence',
     label: '线索板',
+    freq: 'rare',
     hint: '列出目前掌握的证据与疑点，每条格式 [编号] 内容 — 指向（明确了什么/还差什么）。',
     kind: 'list'
   },
   suspects: {
     id: 'suspects',
     label: '嫌疑人名单',
+    freq: 'rare',
     hint: '列出嫌疑人，每条 [姓名] 身份 — 嫌疑指数 0-100 — 一句话动机或不在场证明。',
     kind: 'list'
   },
   supplies: {
     id: 'supplies',
     label: '物资储备',
+    freq: 'rare',
     hint: '用键值卡片列出物资：食物 / 水 / 药品 / 电池 / 武器，注明天数余量与消耗速度。',
     kind: 'kv'
   },
   radio: {
     id: 'radio',
     label: '电台杂音',
+    freq: 'each',
     hint: '生成 4-6 条断断续续的外部讯号，格式 [频率]: 内容，营造信息不对称的压迫感。',
     kind: 'list'
   },
   party: {
     id: 'party',
     label: '队伍成员',
+    freq: 'rare',
     hint: '列出队伍成员，每条 [姓名] 职业 — 状态 — 一句忠诚度或暗流备注。',
     kind: 'list'
   },
   purse: {
     id: 'purse',
     label: '行囊与金币',
+    freq: 'rare',
     hint: '用键值卡片列出金币、消耗品、特殊道具与负重情况。',
     kind: 'kv'
   },
   tavern: {
     id: 'tavern',
     label: '酒馆传言',
+    freq: 'rare',
     hint: '生成 4-6 条酒馆里听来的传言，格式 [酒客]: 内容，其中至少一条暗藏真实任务线索。',
     kind: 'list'
   },
   campus: {
     id: 'campus',
     label: '校园流言',
+    freq: 'rare',
     hint: '生成 4-6 条校园里的流言与八卦，格式 [来源]: 内容。',
     kind: 'list'
   },
   club: {
     id: 'club',
     label: '社团名录',
+    freq: 'rare',
     hint: '列出与剧情相关的社团/班级成员，每条 [姓名] 身份 — 与主角的关系。',
     kind: 'list'
   }
@@ -354,7 +375,8 @@ export function makePanel(partial) {
     id: partial.id || `panel_${Math.random().toString(36).slice(2, 8)}`,
     label: partial.label || '新面板',
     hint: partial.hint || '按当前剧情，生成这个面板应当展示的内容。',
-    kind: partial.kind || 'text'
+    kind: partial.kind || 'text',
+    freq: partial.freq === 'each' ? 'each' : 'rare'
   };
 }
 

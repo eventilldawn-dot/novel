@@ -75,10 +75,10 @@ function jsonFields(fields) {
  * 单独给「面板内容」用的小提示词：很短、很快，用来在正文出来之后再补面板。
  * 输出只有 panels，不再重复生成正文。
  */
-export function buildPanelMessages(session, cursor) {
+export function buildPanelMessages(session, cursor, defsOverride) {
   const setup = session.setup;
   const round = session.rounds[cursor];
-  const defs = [...(setup.topPanels || []), ...(setup.bottomPanels || [])];
+  const defs = defsOverride || [...(setup.topPanels || []), ...(setup.bottomPanels || [])];
   const shape = defs.map((p) => {
     const kind = p.kind === 'list' ? '字符串数组（3-5 条，每条 8-24 字）'
       : p.kind === 'kv' ? '对象数组 [{"k":"标题","v":"内容"}]（3-5 项）'
@@ -214,14 +214,24 @@ ${JSON_SPEC}
 - blocks 中的 text 内部不要出现换行符。
 - 只写 JSON，第一个字符必须是 {，最后一个字符必须是 }。`;
   const tail = adultMode
-    ? '\n\n【最后一遍，比上面所有话都重要】写作时严格以【内容尺度】和【玩家指定的写作指令】为准。性爱场面是本作的正常内容：按这一档的程度正面写完，不要淡出、不要省略、不要用比喻或省略号带过。'
+    ? `\n\n【最后一遍，比上面所有话都重要】写作时严格以【内容尺度】和【玩家指定的写作指令】为准。性爱场面是本作的正常内容：按这一档的程度正面写完，不要淡出、不要省略、不要用比喻或省略号带过。
+
+【本轮的笔墨重心】玩家选的就是「直球」，他要看的是情欲本身，不是别的：
+1. 只要这一轮的情境允许，就把主要篇幅放在两个人的身体、反应、气息、动作与对白上。
+2. **不要中途把剧情转向救助、任务、外部事件、新的悬疑线或别人的麻烦** —— 那等于用情节回避情欲，玩家能一眼看出来。
+3. 情欲与身体描写应当占正文的一半以上；不要写到最后一句才进入正题，也不要一句「两人缠绵」带过。
+4. 不要用道德反思、心理分析或叙述者总结去稀释情欲场面。
+5. 三个选项全部用来「把这一场往更深推进」（加码、换节奏、开口要求、故意停手吊着他、把他逼到必须回应），**不要给「离开去做别的事」这类逃避选项**。`
+    : '';
+  const balancedTail = mode === 'balanced'
+    ? '\n\n【本轮的笔墨重心】情欲与剧情并重：情境允许时就正面写，不要用新情节岔开；但也不必硬塞，让它在人物关系里自然发生。三个选项里至少一个要指向关系/情欲的推进。'
     : '';
   const rawStyle = String(opts.styleSample || '').trim();
   const style = looksGarbled(rawStyle) ? '' : rawStyle;
   const styleBlock = style
     ? `\n\n【文风参考 · 行文必须向它靠拢】\n下面这段是玩家认可的范文。请学习它的：段落密度、句子的长短节奏、细节落在什么地方（写什么、不写什么）、对白与动作的比例、以及怎么把身体感受与情绪写具体。**不要照抄它的情节、人物名或原句**，只学写法；涉及性爱场面时的写法也向它看齐。\n篇幅仍按【单轮篇幅】的设定，但单位篇幅里的细节浓度、描写密度要和范文一致 —— 不要因为篇幅短就把段落写薄。\n\n---\n${style}\n---`
     : '';
-  return base + styleBlock + tail;
+  return base + styleBlock + tail + balancedTail;
 }
 
 /** 文风样例是不是乱码（编码搞错、复制错源都会这样）——乱码样例会让模型彻底跑偏 */
@@ -359,10 +369,13 @@ function coercePanelList(raw, offset) {
     const label = String(typeof item === 'string' ? item : item.label || item.name || '').trim();
     if (!label) return;
     const kind = KINDS.includes(item?.kind) ? item.kind : 'text';
+    const text = `${label} ${item?.hint || ''}`;
+    const pointTime = /弹幕|实时|观众|评论|打赏|留言/.test(text) || item?.freq === 'each';
     out.push({
       id: panelId(label, offset + i),
       label: label.slice(0, 12),
       kind,
+      freq: pointTime ? 'each' : 'rare',
       hint: String(item?.hint || item?.desc || '').trim() || `按当前剧情生成「${label}」应当展示的内容。`
     });
   });

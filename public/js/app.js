@@ -300,6 +300,9 @@ function panelState(session, index) {
 async function fillPanelsInBackground(session, index) {
   const round = session.rounds[index];
   if (!round) return;
+  // 只更新"到点该更新"的面板：实时类每轮更新，其余每 4 轮更新一次
+  const due = duePanels(session, index);
+  if (!due.length) return;
   const key = panelKey(session, index);
   panelJobs.set(key, 'pending');
   if (state.session?.id === session.id && state.session.cursor === index && state.activePanel) {
@@ -307,8 +310,9 @@ async function fillPanelsInBackground(session, index) {
     if (def) ui.openDrawer(def, round.panels?.[def.id], { pending: true });
   }
   try {
-    const panels = await generatePanels({ session, cursor: index });
+    const panels = await generatePanels({ session, cursor: index, panels: due });
     round.panels = { ...(round.panels || {}), ...panels };
+    for (const def of due) def.lastAt = index;
     panelJobs.delete(key);
     persist(session);
   } catch (err) {
@@ -324,6 +328,16 @@ async function fillPanelsInBackground(session, index) {
     const def = currentPanelDefs().find((p) => p.id === state.activePanel);
     if (def) ui.openDrawer(def, round.panels[def.id]);
   }
+}
+
+/** 哪些面板这一轮该更新了 */
+function duePanels(session, index) {
+  const defs = [...(session.setup.topPanels || []), ...(session.setup.bottomPanels || [])];
+  return defs.filter((def) => {
+    if (def.freq === 'each') return true;                 // 弹幕这类：每轮都更新
+    const last = Number.isFinite(def.lastAt) ? def.lastAt : -99;
+    return index - last >= 4;                             // 其余：每 4 轮更新一次
+  });
 }
 
 function dropSession(id) {
@@ -715,6 +729,10 @@ function renderPanelEditor(scope) {
         <option value="kv"${p.kind === 'kv' ? ' selected' : ''}>卡片</option>
         <option value="notes"${p.kind === 'notes' ? ' selected' : ''}>思路</option>
       </select>
+      <select data-field="freq" title="更新频率">
+        <option value="rare"${p.freq !== 'each' ? ' selected' : ''}>偶尔更新</option>
+        <option value="each"${p.freq === 'each' ? ' selected' : ''}>每轮更新</option>
+      </select>
       <input type="text" class="hint" value="${esc(p.hint)}" data-field="hint" placeholder="给导演的内容指令" />
       <button class="del" data-del-panel="${i}">✕</button>
     </div>`).join('');
@@ -728,6 +746,7 @@ function syncPanelDraft() {
     if (!list[i]) return;
     list[i].label = row.querySelector('[data-field="label"]').value.trim() || list[i].label;
     list[i].kind = row.querySelector('[data-field="kind"]').value;
+    list[i].freq = row.querySelector('[data-field="freq"]').value;
     list[i].hint = row.querySelector('[data-field="hint"]').value.trim() || list[i].hint;
   });
 }
@@ -1285,11 +1304,21 @@ function openPanel(id) {
   renderPanelButtons();
   if (!state.activePanel) { ui.closeDrawer(); return; }
   const st = panelState(s, s.cursor);
-  const value = round.panels?.[id];
+  // 面板可能是每 4 轮才更新一次 —— 没更新的轮次就沿用最近一次的内容
+  const value = panelValue(s, s.cursor, id);
   ui.openDrawer(def, value, {
     pending: st === 'pending' && !hasPanelContent(value),
     failed: st === 'failed' && !hasPanelContent(value)
   });
+}
+
+/** 取某个面板"最近一次生成过的内容" */
+function panelValue(session, index, id) {
+  for (let i = index; i >= 0; i -= 1) {
+    const v = session.rounds[i]?.panels?.[id];
+    if (hasPanelContent(v)) return v;
+  }
+  return undefined;
 }
 
 function hasPanelContent(value) {
@@ -1618,8 +1647,8 @@ async function openSettings() {
     <div class="field">
       <label class="field-label">思考强度<span class="field-hint">v4/flash 是推理模型，"想"的时间占了大头 —— 觉得慢就调低</span></label>
       <div class="chip-row" id="s-reasoning">
-        ${[['off', '关闭（最快）'], ['low', '低（推荐）'], ['medium', '默认（最慢、文笔最好）']]
-          .map(([k, n]) => `<button class="chip${(local.reasoningEffort || cfg.reasoningEffort || 'low') === k ? ' active' : ''}" data-r="${k}">${esc(n)}</button>`).join('')}
+        ${[['default', '默认（推荐 · 文笔最好）'], ['low', '低（省时间）'], ['off', '关闭（最快 · 只建议给面板用）']]
+          .map(([k, n]) => `<button class="chip${(local.reasoningEffort || cfg.reasoningEffort || 'default') === k ? ' active' : ''}" data-r="${k}">${esc(n)}</button>`).join('')}
       </div>
     </div>
     <div class="field">
@@ -1797,7 +1826,7 @@ async function openSettings() {
       };
       patch.styleSample = modal.querySelector('#s-style').value.trim();
       patch.defaultMode = modal.querySelector('#s-default-mode .chip.active')?.dataset.dm || 'balanced';
-      patch.reasoningEffort = modal.querySelector('#s-reasoning .chip.active')?.dataset.r || 'low';
+      patch.reasoningEffort = modal.querySelector('#s-reasoning .chip.active')?.dataset.r || 'default';
       if (looksGarbled(patch.styleSample)) {
         ui.toast('⚠ 这段文风样例看起来是乱码（编码不对），已忽略它 —— 请重新复制一段正常的文本。', 'warn');
       }
