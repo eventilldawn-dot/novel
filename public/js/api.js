@@ -385,9 +385,9 @@ export async function designSetup({ draft, localFallback }) {
 }
 
 /** 人设工坊：把粗略要点扩写成完整角色卡 */
-export async function designSheet({ rough, mode, intensity }) {
+export async function designSheet({ rough, mode, intensity, orientation }) {
   try {
-    const raw = await request({ messages: buildSheetMessages(rough, { mode, intensity }), stream: false, json: true });
+    const raw = await request({ messages: buildSheetMessages(rough, { mode, intensity, orientation }), stream: false, json: true });
     return { ok: true, sheet: normalizeSheet(extractJson(raw)) };
   } catch (err) {
     return { ok: false, error: err.message, hint: err.hint || '' };

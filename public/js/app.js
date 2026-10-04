@@ -6,6 +6,7 @@ import {
   TEMPLATES, EMOTION_PRESETS, LENGTH_PRESETS, TONE_PRESETS, POV_PRESETS,
   PANEL_LIBRARY, makePanel, cloneTemplate, suggestSetupLocal,
   MODE_PRESETS, MODE_ORDER, INTENSITY_MODE_MAP
+  , ORIENTATION_PRESETS, ORIENTATION_ORDER
 } from './presets.js';
 import { store, newSession } from './store.js';
 import * as syncApi from './sync.js';
@@ -80,6 +81,7 @@ async function boot() {
   state.serverCfg = cfg.config || {};
   if (state.serverCfg.styleSample) localConfig.write({ styleSample: state.serverCfg.styleSample });
   if (state.serverCfg.defaultMode) localConfig.write({ defaultMode: state.serverCfg.defaultMode });
+  if (state.serverCfg.defaultOrientation) localConfig.write({ defaultOrientation: state.serverCfg.defaultOrientation });
 
   const activeId = store.activeId();
   const session = activeId ? store.getSession(activeId) : null;
@@ -401,7 +403,9 @@ function enterSession(session) {
 
 function blankSetup() {
   const t = cloneTemplate(TEMPLATES[TEMPLATES.length - 1]);
-  const defaultMode = localConfig.read().defaultMode || 'balanced';
+  const prefs = localConfig.read();
+  const defaultMode = prefs.defaultMode || 'balanced';
+  const defaultOrientation = prefs.defaultOrientation || 'mm';
   return {
     templateId: t.id,
     emoji: t.emoji,
@@ -416,6 +420,7 @@ function blankSetup() {
     emotions: [...t.emotions],
     intensity: MODE_PRESETS[defaultMode].intensity,
     mode: defaultMode,
+    orientation: defaultOrientation,
     customPrompt: DEFAULT_CUSTOM_PROMPT,
     idea: '',
     sheet: emptySheet(),
@@ -488,6 +493,7 @@ function finishBuilderSave(sheet) {
   else if (draft) {
     draft.sheet = saved;
     draft.mode = mode;
+    draft.orientation = saved.orientation || 'mm';
     draft.intensity = MODE_PRESETS[mode]?.intensity || draft.intensity;
     applySheetToDraft();
   }
@@ -509,7 +515,10 @@ function openBuilder({ sheet, onSave, fromSetup, mode }) {
 function renderBuilder() {
   const modeBlock = `
     <div class="sheet-group sheet-mode">
-      <span class="sheet-group-title">〇 · 这一步的尺度（先定这个）</span>
+      <span class="sheet-group-title">〇 · 取向与尺度（先定这两个）</span>
+      <div class="chip-row" id="bld-orientation" style="margin-bottom:10px">
+        ${ORIENTATION_ORDER.map((k) => `<button class="chip${(builderSheet.orientation || 'mm') === k ? ' active' : ''}" data-bo="${k}">${ORIENTATION_PRESETS[k].icon} ${esc(ORIENTATION_PRESETS[k].name)}</button>`).join('')}
+      </div>
       <div class="chip-row" id="bld-mode">
         ${MODE_ORDER.map((k) => `<button class="chip${(builderSheet.mode || 'balanced') === k ? ' active' : ''}" data-bm="${k}">${MODE_PRESETS[k].icon} ${esc(MODE_PRESETS[k].name)}</button>`).join('')}
       </div>
@@ -612,14 +621,17 @@ async function builderAiFill() {
     const res = await designSheet({
       rough: sheetToReadableText(builderSheet),
       mode,
-      intensity: MODE_PRESETS[mode]?.intensity || ''
+      intensity: MODE_PRESETS[mode]?.intensity || '',
+      orientation: builderSheet.orientation || 'mm'
     });
     if (res.ok) {
       const keptIdea = builderSheet.idea;      // 总设定与尺度要留着，AI 只负责拆解
       const keptMode = mode;
+      const keptOrientation = builderSheet.orientation || 'mm';
       builderSheet = res.sheet;
       builderSheet.idea = keptIdea;
       builderSheet.mode = keptMode;
+      builderSheet.orientation = keptOrientation;
       renderBuilder();
       $('#builder-note').innerHTML = '✅ 已补全。可以再手动改，改完点下面保存。';
     } else {
@@ -787,6 +799,7 @@ function collectSetup() {
     emotions: draft.emotions.length ? draft.emotions : ['好感度', '愉悦度', '羞耻度', '痛苦', '沉溺'],
     intensity: draft.intensity,
     mode: draft.mode || 'balanced',
+    orientation: draft.orientation || 'mm',
     customPrompt: draft.customPrompt,
     idea: draft.idea || draft.sheet?.idea || '',
     sheet: draft.sheet,
@@ -819,6 +832,13 @@ function bindSetup() {
   });
   $('#builder-ai').addEventListener('click', builderAiFill);
   $('#builder-groups').addEventListener('click', (e) => {
+    const oriChip = e.target.closest('[data-bo]');
+    if (oriChip) {
+      readBuilder();
+      builderSheet.orientation = oriChip.dataset.bo;
+      renderBuilder();
+      return;
+    }
     const modeChip = e.target.closest('[data-bm]');
     if (modeChip) {
       readBuilder();
@@ -1447,6 +1467,9 @@ function openWriting() {
     </div>
     <div class="field">
       <label class="field-label">内容尺度</label>
+      <div class="chip-row" id="w-orientation" style="margin-bottom:10px">
+        ${ORIENTATION_ORDER.map((k) => `<button class="chip${(s.setup.orientation || 'mm') === k ? ' active' : ''}" data-wo="${k}">${ORIENTATION_PRESETS[k].icon} ${esc(ORIENTATION_PRESETS[k].name)}</button>`).join('')}
+      </div>
       <div class="chip-row" id="w-intensity">
         ${INTENSITY.map((it) => `<button class="chip${cur === it.text ? ' active' : ''}" data-w="${esc(it.label)}">${esc(it.label)}</button>`).join('')}
       </div>
@@ -1474,6 +1497,14 @@ function openWriting() {
   `, (modal) => {
     let picked = cur;
     let pickedMode = modeOf(s.setup);
+    let pickedOrientation = s.setup.orientation || 'mm';
+    modal.querySelector('#w-orientation').addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-wo]');
+      if (!chip) return;
+      pickedOrientation = chip.dataset.wo;
+      modal.querySelectorAll('#w-orientation .chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
     modal.querySelector('#w-modes').addEventListener('click', (e) => {
       const chip = e.target.closest('[data-m]');
       if (!chip) return;
@@ -1532,6 +1563,7 @@ function openWriting() {
     modal.querySelector('#w-save').addEventListener('click', () => {
       s.setup.intensity = picked;
       s.setup.mode = pickedMode;
+      s.setup.orientation = pickedOrientation;
       if (pickedLen) s.setup.lengthHint = pickedLen;
       s.setup.customPrompt = modal.querySelector('#w-custom').value.trim();
       persist(s);
@@ -1642,6 +1674,12 @@ async function openSettings() {
       <label class="field-label">默认尺度模式<span class="field-hint">新建剧情时的默认值（老剧情不受影响）</span></label>
       <div class="chip-row" id="s-default-mode">
         ${MODE_ORDER.map((k) => `<button class="chip${(local.defaultMode || 'balanced') === k ? ' active' : ''}" data-dm="${k}">${MODE_PRESETS[k].icon} ${esc(MODE_PRESETS[k].name)}</button>`).join('')}
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label">默认取向<span class="field-hint">会作为硬性设定写进提示词</span></label>
+      <div class="chip-row" id="s-default-orientation">
+        ${ORIENTATION_ORDER.map((k) => `<button class="chip${(local.defaultOrientation || 'mm') === k ? ' active' : ''}" data-do="${k}">${ORIENTATION_PRESETS[k].icon} ${esc(ORIENTATION_PRESETS[k].name)}</button>`).join('')}
       </div>
     </div>
     <div class="field">
@@ -1775,6 +1813,12 @@ async function openSettings() {
       modal.querySelectorAll('#s-reasoning .chip').forEach((c) => c.classList.remove('active'));
       chip.classList.add('active');
     });
+    modal.querySelector('#s-default-orientation').addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-do]');
+      if (!chip) return;
+      modal.querySelectorAll('#s-default-orientation .chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
 
     modal.querySelector('#s-model-pick').addEventListener('click', (e) => {
       const chip = e.target.closest('[data-pick-model]');
@@ -1827,6 +1871,7 @@ async function openSettings() {
       patch.styleSample = modal.querySelector('#s-style').value.trim();
       patch.defaultMode = modal.querySelector('#s-default-mode .chip.active')?.dataset.dm || 'balanced';
       patch.reasoningEffort = modal.querySelector('#s-reasoning .chip.active')?.dataset.r || 'default';
+      patch.defaultOrientation = modal.querySelector('#s-default-orientation .chip.active')?.dataset.do || 'mm';
       if (looksGarbled(patch.styleSample)) {
         ui.toast('⚠ 这段文风样例看起来是乱码（编码不对），已忽略它 —— 请重新复制一段正常的文本。', 'warn');
       }

@@ -3,6 +3,7 @@
  */
 
 import { SHEET_SCHEMA, CAST_FIELDS, normalizeSheet } from './sheet.js';
+import { ORIENTATION_PRESETS } from './presets.js';
 
 const JSON_SPEC = `{
   "scene": {
@@ -115,9 +116,13 @@ export function buildSheetMessages(rough, opts = {}) {
   const mode = opts.mode || 'balanced';
   const intensity = String(opts.intensity || '').trim();
   const adultMode = mode !== 'story';
+  const orientation = ORIENTATION_PRESETS[opts.orientation] || ORIENTATION_PRESETS.mm;
+  const orientationRule = orientation.rule
+    ? `\n0. **关系取向（硬性）**：${orientation.rule} 所有角色的 gender 字段必须与之一致（例如男男设定下，me 与 cast 全部填「男」），不要出现性别错位。\n`
+    : '';
 
   const system = `你是角色设定师。玩家会给你一些粗略的点子，你要把它补全成具体、自洽、可以直接开演的一整套角色卡。
-
+${orientationRule}
 要求：
 1. 每个字段 20-80 字，写具体的细节（尺寸、物件、口癖、明确的欲望与恐惧），不要写空泛的形容词堆砌。
 2. 只写「设定」，不要写剧情经过，不要写成小说段落。
@@ -159,7 +164,12 @@ export function buildSystemPrompt(setup, opts = {}) {
   const mode = modeOf(setup);
   const adultMode = mode === 'explicit';
   const sheetBlock = buildSheetBlock(setup.sheet);
+  const orientation = ORIENTATION_PRESETS[setup.orientation] || ORIENTATION_PRESETS.mm;
+  const orientationBlock = orientation.rule
+    ? `\n【关系取向 · 硬性设定，全篇始终遵守】\n${orientation.rule}\n`
+    : '';
   const base = `你是「Novel」的导演引擎 —— 一位功力深厚的中文互动小说作者，负责推进一部沉浸式文字剧情。
+${orientationBlock}
 
 【世界观与剧情设定】
 ${setup.scenario || '（未指定，请按你自己的判断构建一个自洽且迷人的世界）'}

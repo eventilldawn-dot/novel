@@ -4,6 +4,7 @@
 //       + 总体关系（relation） + 世界与剧情（world） + 开场（opening）
 
 export const ME_FIELDS = [
+  { key: 'gender', label: '性别', ph: '男', rows: 1 },
   { key: 'name', label: '姓名 / 代号', ph: '例：沈砚，巡捕房翻译', rows: 1 },
   { key: 'identity', label: '身份 · 职业', ph: '例：表面是翻译，实为潜伏的暗线', rows: 2 },
   { key: 'look', label: '外貌 · 体型 · 穿着', ph: '身高体型、脸、常穿什么、身上有什么记号', rows: 2 },
@@ -13,6 +14,7 @@ export const ME_FIELDS = [
 ];
 
 export const CAST_FIELDS = [
+  { key: 'gender', label: '性别', ph: '男', rows: 1 },
   { key: 'name', label: '姓名 / 代号 · 身份', ph: '例：Arthur · 王国骑士', rows: 2 },
   { key: 'face', label: '发色 · 发型 · 瞳色 · 面容', ph: '例：麦浪般的浅金短发、晴空般蔚蓝的眼睛、有颗小虎牙', rows: 2 },
   { key: 'body', label: '体型 · 肤色 · 独特标志', ph: '身高、结实还是精瘦、晒成的蜜色、疤/痣/纹身/小动作', rows: 2 },
@@ -53,7 +55,7 @@ export function emptyCastCard() {
 }
 
 export function emptySheet() {
-  const out = { idea: '', mode: 'balanced', opening: '', cast: [emptyCastCard()] };
+  const out = { idea: '', mode: 'balanced', orientation: 'mm', opening: '', cast: [emptyCastCard()] };
   for (const [group, fields] of Object.entries(SHEET_SCHEMA)) {
     out[group] = {};
     for (const f of fields) out[group][f.key] = '';
@@ -75,6 +77,7 @@ export function normalizeSheet(raw) {
 
   if (typeof raw.idea === 'string') base.idea = raw.idea.trim();
   if (typeof raw.mode === 'string') base.mode = raw.mode;
+  if (typeof raw.orientation === 'string') base.orientation = raw.orientation;
   if (typeof raw.opening === 'string') base.opening = raw.opening.trim();
 
   for (const [group, fields] of Object.entries(SHEET_SCHEMA)) fillFields(base[group], raw[group] || {}, fields);

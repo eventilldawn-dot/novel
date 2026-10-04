@@ -354,6 +354,32 @@ export const MODE_PRESETS = {
 
 export const MODE_ORDER = ['story', 'balanced', 'explicit'];
 
+/** 关系取向：写进提示词的硬性设定，防止模型自己写歪 */
+export const ORIENTATION_PRESETS = {
+  mm: {
+    name: '男男',
+    icon: '🧑‍🤝‍🧑',
+    rule: '本作是**男性与男性之间**的恋爱与情欲故事。所有恋爱关系、追求对象、情欲与性场面都只发生在男性角色之间。女性角色若出现，只能是配角（亲属、同事、路人），绝不参与情欲线，也不要写男女亲热。角色的代词、身体描写与称呼都必须符合男性设定。'
+  },
+  ff: {
+    name: '女女',
+    icon: '👭',
+    rule: '本作是**女性与女性之间**的恋爱与情欲故事。所有恋爱关系、追求对象、情欲与性场面都只发生在女性角色之间。男性角色若出现，只能是配角，绝不参与情欲线。'
+  },
+  mf: {
+    name: '男女',
+    icon: '👫',
+    rule: '本作是男女之间的恋爱与情欲故事。'
+  },
+  any: {
+    name: '不限',
+    icon: '✳️',
+    rule: ''
+  }
+};
+
+export const ORIENTATION_ORDER = ['mm', 'ff', 'mf', 'any'];
+
 /** 细档位 → 模式的映射，用来让两套控件保持同步 */
 export const INTENSITY_MODE_MAP = {
   全年龄: 'story',

@@ -48,7 +48,7 @@ function loadConfig() {
 
 async function saveConfig(patch) {
   const next = { ...config };
-  for (const key of ['baseUrl', 'apiKey', 'model', 'systemExtra', 'syncToken', 'styleSample', 'defaultMode', 'reasoningEffort']) {
+  for (const key of ['baseUrl', 'apiKey', 'model', 'systemExtra', 'syncToken', 'styleSample', 'defaultMode', 'reasoningEffort', 'defaultOrientation']) {
     if (typeof patch[key] === 'string') next[key] = patch[key].trim();
   }
   for (const key of ['temperature', 'maxTokens', 'timeoutMs']) {
@@ -357,6 +357,7 @@ function publicConfig() {
     styleSample: config.styleSample || '',
     defaultMode: config.defaultMode || 'balanced',
     reasoningEffort: config.reasoningEffort || 'low',
+    defaultOrientation: config.defaultOrientation || 'mm',
     hasKey: Boolean(config.apiKey),
     keyPreview: config.apiKey ? `${config.apiKey.slice(0, 4)}····${config.apiKey.slice(-4)}` : ''
   };
