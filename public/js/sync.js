@@ -98,6 +98,24 @@ export async function pull() {
   return data;
 }
 
+/** 只问版本号（很小），用来判断要不要下载整份数据 */
+export async function version() {
+  if (!state.available) return null;
+  try {
+    const res = await fetch(`${state.base}/api/store/version`, { headers: headers(), cache: 'no-store' });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+const KEY_VERSION = 'novel.storeVersion.v1';
+export const lastVersion = {
+  get() { try { return localStorage.getItem(KEY_VERSION) || ''; } catch { return ''; } },
+  set(v) { try { localStorage.setItem(KEY_VERSION, String(v || '')); } catch { /* ignore */ } }
+};
+
 export async function push({ sessions = [], deleted = [] }) {
   if (!state.available) throw new Error('没有可用的同步服务');
   const res = await fetch(`${state.base}/api/store`, {
@@ -111,6 +129,7 @@ export async function push({ sessions = [], deleted = [] }) {
   state.lastSync = Date.now();
   state.error = '';
   state.count = data.count ?? state.count;
+  if (data.updatedAt) lastVersion.set(data.updatedAt);
   return data;
 }
 
@@ -122,14 +141,57 @@ export function clearError() {
   state.error = '';
 }
 
-/** 合并两份数据：同 id 取 updatedAt 更新的那份 */
+/**
+ * 合并同一部剧情的两份副本。
+ * 规则：整体以 updatedAt 较新的那份为准（标题/设定/游标），
+ *       但**轮次做并集** —— 同序号取 createdAt 较新的，谁都不丢。
+ * 这样即使时间戳判断出错，也不会再出现"某一端写的内容被覆盖"。
+ */
+export function pickSession(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const newer = (a.updatedAt || 0) >= (b.updatedAt || 0) ? a : b;
+  const older = newer === a ? b : a;
+  const out = { ...newer };
+
+  const len = Math.max(a.rounds?.length || 0, b.rounds?.length || 0);
+  if (len) {
+    const rounds = [];
+    for (let i = 0; i < len; i += 1) {
+      const ra = a.rounds?.[i];
+      const rb = b.rounds?.[i];
+      if (!ra) rounds.push(rb);
+      else if (!rb) rounds.push(ra);
+      else rounds.push((ra.createdAt || 0) >= (rb.createdAt || 0) ? ra : rb);
+    }
+    out.rounds = rounds;
+    const want = Number.isFinite(newer.cursor) ? newer.cursor : rounds.length - 1;
+    out.cursor = Math.max(0, Math.min(want, rounds.length - 1));
+  }
+
+  const branches = [...(newer.branches || []), ...(older.branches || [])];
+  if (branches.length) out.branches = branches;
+  return out;
+}
+
+/** 合并两份数据（游标保留本机的 —— 你看到第几轮是每台设备自己的事） */
 export function mergeSessions(local, remote) {
   const map = new Map();
-  for (const s of local || []) if (s?.id) map.set(s.id, s);
+  const localCursor = new Map();
+  for (const s of local || []) {
+    if (!s?.id) continue;
+    map.set(s.id, s);
+    localCursor.set(s.id, s.cursor);
+  }
   for (const s of remote || []) {
     if (!s?.id) continue;
-    const old = map.get(s.id);
-    if (!old || (s.updatedAt || 0) > (old.updatedAt || 0)) map.set(s.id, s);
+    map.set(s.id, pickSession(map.get(s.id), s));
   }
-  return Array.from(map.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const out = Array.from(map.values()).map((s) => {
+    if (!localCursor.has(s.id) || !Array.isArray(s.rounds) || !s.rounds.length) return s;
+    const want = localCursor.get(s.id);
+    if (!Number.isFinite(want)) return s;
+    return { ...s, cursor: Math.max(0, Math.min(want, s.rounds.length - 1)) };
+  });
+  return out.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }

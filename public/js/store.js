@@ -29,10 +29,11 @@ export const store = {
   listSessions() {
     return read(KEY_SESSIONS, []);
   },
-  saveSession(session) {
+  /** touch=false 表示这次只是改游标/翻页，不算内容变更，不要更新 updatedAt */
+  saveSession(session, { touch = true } = {}) {
     const list = this.listSessions();
     const i = list.findIndex((s) => s.id === session.id);
-    session.updatedAt = Date.now();
+    if (touch) session.updatedAt = Date.now();
     if (i >= 0) list[i] = session;
     else list.unshift(session);
     list.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));

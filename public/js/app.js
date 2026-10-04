@@ -174,6 +174,13 @@ async function bootSync() {
   state.sync.busy = true;
   updateSyncUI();
   try {
+    // 先问版本号：服务器没变过就不下载整份数据（手机上打开会快很多）
+    const v = await syncApi.version();
+    if (v && syncApi.lastVersion.get() === String(v.updatedAt) && store.listSessions().length) {
+      state.sync.count = v.count || state.sync.count;
+      syncApi.clearError();
+      return;
+    }
     const remote = await syncApi.pull();
     const merged = syncApi.mergeSessions(store.listSessions(), remote.sessions || []);
     store.replaceAll(merged);
@@ -273,8 +280,8 @@ function renderSessionList() {
 }
 
 /** 存到本机 + 排队推到服务器 */
-function persist(session) {
-  const ok = store.saveSession(session);
+function persist(session, opts = {}) {
+  const ok = store.saveSession(session, opts);
   if (!ok) {
     ui.toast('本机浏览器存不下了（localStorage 已满）。数据仍会同步到电脑上；建议到「⇅ 数据」导出备份，再删掉几部旧剧情。', 'warn');
   }
@@ -1025,7 +1032,12 @@ async function generate() {
     state.abort = null;
     setSendState(false);
     const input = $('[data-input]');
-    if (input) { fitTextarea(input); input.focus({ preventScroll: true }); }
+    if (input) {
+      fitTextarea(input);
+      // 手机上不要自动聚焦，否则会弹出键盘挡住正文
+      const coarse = window.matchMedia?.('(pointer: coarse)').matches;
+      if (!coarse) input.focus({ preventScroll: true });
+    }
   }
 }
 
@@ -1292,7 +1304,7 @@ function gotoRound(index) {
   if (index < 0) { ui.toast('已经是第一轮了。'); return; }
   if (index >= s.rounds.length) return;
   s.cursor = index;
-  persist(s);
+  persist(s, { touch: false });      // 只是翻页，不算内容更新（否则会覆盖别的设备的新内容）
   state.activePanel = null;
   ui.closeDrawer();
   ui.renderRounds(s, { futureCount: s.rounds.length - 1 - s.cursor });
@@ -1312,7 +1324,7 @@ function regenerate() {
   s.pendingAction = round.playerAction || '';
   s.cursor -= 1;
   state.stick = true;
-  persist(s);
+  persist(s, { touch: false });
   ui.renderRounds(s, { futureCount: s.rounds.length - 1 - s.cursor });
   ui.renderRoundNav(s);
   generate();

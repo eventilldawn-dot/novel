@@ -10,6 +10,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const os = require('os');
+const zlib = require('zlib');
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
@@ -77,11 +78,29 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8'
 };
 
-function sendJson(res, status, obj) {
-  const body = JSON.stringify(obj);
+/** 能压就压：隧道/手机上，100KB 的剧情数据压缩后通常只剩十几 KB */
+function maybeGzip(req, res, buf, type) {
+  const accept = String(req?.headers?.['accept-encoding'] || '');
+  if (!/gzip/.test(accept)) return buf;
+  if (buf.length < 1024) return buf;
+  if (!/^(text\/|application\/(json|javascript|manifest))/.test(type)) return buf;
+  try {
+    const gz = zlib.gzipSync(buf, { level: 6 });
+    if (gz.length >= buf.length * 0.92) return buf;
+    res.setHeader('Content-Encoding', 'gzip');
+    res.setHeader('Vary', 'Accept-Encoding');
+    return gz;
+  } catch {
+    return buf;
+  }
+}
+
+function sendJson(res, status, obj, req) {
+  const raw = Buffer.from(JSON.stringify(obj), 'utf8');
+  const body = maybeGzip(req, res, raw, 'application/json; charset=utf-8');
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(body),
+    'Content-Length': body.length,
     'Cache-Control': 'no-store'
   });
   res.end(body);
@@ -158,14 +177,42 @@ async function persistStore() {
   return storeWriting;
 }
 
-/** 合并：同 id 取 updatedAt 更新的那份；deleted 里的 id 直接删掉 */
+/**
+ * 合并同一部剧情的两份副本：整体取 updatedAt 较新的，
+ * 但轮次做并集（同序号取 createdAt 较新的），保证任何一端写的内容都不会被覆盖。
+ */
+function pickSession(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  const newer = (a.updatedAt || 0) >= (b.updatedAt || 0) ? a : b;
+  const older = newer === a ? b : a;
+  const out = { ...newer };
+  const len = Math.max((a.rounds || []).length, (b.rounds || []).length);
+  if (len) {
+    const rounds = [];
+    for (let i = 0; i < len; i += 1) {
+      const ra = a.rounds && a.rounds[i];
+      const rb = b.rounds && b.rounds[i];
+      if (!ra) rounds.push(rb);
+      else if (!rb) rounds.push(ra);
+      else rounds.push((ra.createdAt || 0) >= (rb.createdAt || 0) ? ra : rb);
+    }
+    out.rounds = rounds;
+    const want = Number.isFinite(newer.cursor) ? newer.cursor : rounds.length - 1;
+    out.cursor = Math.max(0, Math.min(want, rounds.length - 1));
+  }
+  const branches = [...(newer.branches || []), ...(older.branches || [])];
+  if (branches.length) out.branches = branches;
+  return out;
+}
+
+/** 合并：同 id 逐轮并集；deleted 里的 id 直接删掉 */
 function mergeStore(incoming, deleted) {
   const map = new Map((storeCache?.sessions || []).map((s) => [s.id, s]));
   for (const id of deleted || []) map.delete(id);
   for (const s of incoming || []) {
     if (!s || !s.id) continue;
-    const old = map.get(s.id);
-    if (!old || (s.updatedAt || 0) >= (old.updatedAt || 0)) map.set(s.id, s);
+    map.set(s.id, pickSession(map.get(s.id), s));
   }
   storeCache.sessions = Array.from(map.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   return storeCache;
@@ -229,9 +276,18 @@ function authBlocked(req, url) {
 }
 
 async function handleStore(req, res, pathname) {
+  // 轻量版本号：客户端先问这个，没变就不下载整份数据（手机上打开会快很多）
+  if (pathname === '/api/store/version') {
+    const store = await loadStore();
+    return sendJson(res, 200, {
+      ok: true,
+      updatedAt: store.updatedAt,
+      count: store.sessions.length
+    }, req);
+  }
   if (req.method === 'GET') {
     const store = await loadStore();
-    return sendJson(res, 200, { ok: true, updatedAt: store.updatedAt, sessions: store.sessions });
+    return sendJson(res, 200, { ok: true, updatedAt: store.updatedAt, sessions: store.sessions }, req);
   }
   if (req.method === 'POST' || req.method === 'PUT') {
     let body;
@@ -276,12 +332,14 @@ async function serveStatic(req, res, pathname) {
     const stat = await fsp.stat(filePath);
     const real = stat.isDirectory() ? path.join(filePath, 'index.html') : filePath;
     const data = await fsp.readFile(real);
+    const type = MIME[path.extname(real).toLowerCase()] || 'application/octet-stream';
+    const body = maybeGzip(req, res, data, type);
     res.writeHead(200, {
-      'Content-Type': MIME[path.extname(real).toLowerCase()] || 'application/octet-stream',
-      'Content-Length': data.length,
+      'Content-Type': type,
+      'Content-Length': body.length,
       'Cache-Control': 'no-cache'
     });
-    res.end(data);
+    res.end(body);
   } catch {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     res.end('404 Not Found');
@@ -543,7 +601,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/config' && req.method === 'GET') {
-    return sendJson(res, 200, { ok: true, config: publicConfig() });
+    return sendJson(res, 200, { ok: true, config: publicConfig() }, req);
   }
 
   if (pathname === '/api/config' && req.method === 'POST') {
