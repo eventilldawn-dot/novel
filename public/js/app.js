@@ -9,8 +9,10 @@ import {
 } from './presets.js';
 import { store, newSession } from './store.js';
 import * as syncApi from './sync.js';
-import { SHEET_SCHEMA, emptySheet, normalizeSheet, sheetToSetupParts, sheetIsEmpty } from './sheet.js';
-import { sheetOnlyHasIdea } from './sheet.js';
+import {
+  SHEET_SCHEMA, CAST_FIELDS, MAX_CAST, emptySheet, emptyCastCard,
+  normalizeSheet, sheetToSetupParts, sheetIsEmpty, sheetOnlyHasIdea
+} from './sheet.js';
 import { looksGarbled, modeOf } from './prompt.js';
 import {
   generateRound, server, designSetup, testConnection,
@@ -410,10 +412,9 @@ async function runAutoDesign({ silent } = {}) {
 /* ---------------- 人设工坊 ---------------- */
 
 const SHEET_GROUPS = [
-  { key: 'me', title: '一 · 我的角色（玩家扮演）' },
-  { key: 'them', title: '二 · 核心角色（AI 演的那位）' },
-  { key: 'relation', title: '三 · 两人的关系' },
-  { key: 'world', title: '四 · 世界与剧情' }
+  { key: 'me', title: '二 · 我的角色（玩家扮演）' },
+  { key: 'relation', title: '四 · 这几个角色与我的总体关系' },
+  { key: 'world', title: '五 · 世界与剧情' }
 ];
 
 let builderSheet = null;
@@ -421,15 +422,23 @@ let builderOnSave = null;
 let builderFromSetup = false;
 
 function finishBuilderSave(sheet) {
+  const saved = normalizeSheet(sheet);
+  const mode = saved.mode || 'balanced';
   $('#screen-builder').classList.remove('open');
-  if (builderOnSave) builderOnSave(sheet);
-  else if (draft) { draft.sheet = sheet; applySheetToDraft(); }
+  if (builderOnSave) builderOnSave(saved, mode);
+  else if (draft) {
+    draft.sheet = saved;
+    draft.mode = mode;
+    draft.intensity = MODE_PRESETS[mode]?.intensity || draft.intensity;
+    applySheetToDraft();
+  }
   if (builderFromSetup) $('#screen-setup').classList.add('open');
-  ui.toast('角色卡已回填到设定（我 / 对方 / 关系 / 世界）。');
+  ui.toast(`角色卡已回填（${saved.cast.length} 个核心角色 · 尺度 ${MODE_PRESETS[mode]?.name || mode}）。`);
 }
 
-function openBuilder({ sheet, onSave, fromSetup }) {
+function openBuilder({ sheet, onSave, fromSetup, mode }) {
   builderSheet = normalizeSheet(sheet || emptySheet());
+  if (mode) builderSheet.mode = mode;
   builderOnSave = onSave || null;
   builderFromSetup = Boolean(fromSetup);
   renderBuilder();
@@ -439,54 +448,97 @@ function openBuilder({ sheet, onSave, fromSetup }) {
 }
 
 function renderBuilder() {
+  const modeBlock = `
+    <div class="sheet-group sheet-mode">
+      <span class="sheet-group-title">〇 · 这一步的尺度（先定这个）</span>
+      <div class="chip-row" id="bld-mode">
+        ${MODE_ORDER.map((k) => `<button class="chip${(builderSheet.mode || 'balanced') === k ? ' active' : ''}" data-bm="${k}">${MODE_PRESETS[k].icon} ${esc(MODE_PRESETS[k].name)}</button>`).join('')}
+      </div>
+      <div class="field-tip" id="bld-mode-desc">${esc(MODE_PRESETS[builderSheet.mode || 'balanced'].desc)}<br>
+        <b>这一档会同时决定「AI 补全时敢不敢写」和「开演后的写法」。</b>选「直球」，人设卡里涉及性的部分就不会被回避掉。</div>
+    </div>`;
   const ideaBlock = `
     <div class="sheet-group sheet-idea">
-      <span class="sheet-group-title">〇 · 总设定（先写这个就够了）</span>
+      <span class="sheet-group-title">一 · 总设定（写了这个就够了）</span>
       <div class="sheet-row">
         <textarea rows="7" data-f="idea" placeholder="把大致构想随手指进来，不用有条理：想写什么关系、什么身份、什么氛围、你希望对方是个什么样的人……&#10;例如：民国上海，我是潜伏在巡捕房的翻译，对方是常来百乐门的日本商人，我要从他嘴里套出运军火的时间表。两个人都在试探，谁先松口谁就输。">${esc(builderSheet.idea || '')}</textarea>
       </div>
-      <div class="field-tip">写完点右上角 <b>✨ AI 补全</b>，它会自动拆到下面每一个字段里（人设、关系、世界观、开场）。下面的格子空着就行，也可以先填几个关键词再补。</div>
+      <div class="field-tip">写完点右上角 <b>✨ AI 补全</b>，它会自动拆到下面每一个字段里。下面是几个角色的卡 —— <b>人数由剧情决定</b>：只有一个主角和一个对手戏就留一张，要攻略好几个人就点「＋ 再加一个核心角色」。</div>
     </div>`;
-  const groups = SHEET_GROUPS.map((g) => {
-    const fields = SHEET_SCHEMA[g.key].map((f) => `
+  const castCards = builderSheet.cast.map((card, i) => {
+    const fields = CAST_FIELDS.map((f) => `
       <div class="sheet-row">
         <span>${esc(f.label)}</span>
-        <textarea rows="${f.rows}" data-f="${g.key}.${f.key}" placeholder="${esc(f.ph)}">${esc(builderSheet[g.key][f.key] || '')}</textarea>
+        <textarea rows="${f.rows}" data-f="cast.${i}.${f.key}" placeholder="${esc(f.ph)}">${esc(card[f.key] || '')}</textarea>
       </div>`).join('');
-    return `<div class="sheet-group" data-group="${g.key}"><span class="sheet-group-title">${esc(g.title)}</span>${fields}</div>`;
+    const canRemove = builderSheet.cast.length > 1;
+    return `<div class="sheet-group sheet-cast" data-cast="${i}">
+      <span class="sheet-group-title">三 · 核心角色 ${i + 1}${card.name ? '：' + esc(card.name) : '（AI 演的那位）'}
+        ${canRemove ? `<button class="cast-del" data-del-cast="${i}" title="删掉这张卡">✕</button>` : ''}
+      </span>
+      ${fields}
+    </div>`;
   }).join('');
+  const addCast = builderSheet.cast.length < MAX_CAST
+    ? `<button class="add-btn" id="add-cast" style="margin-bottom:26px">＋ 再加一个核心角色</button>`
+    : '';
   const opening = `
     <div class="sheet-group">
-      <span class="sheet-group-title">五 · 开场</span>
+      <span class="sheet-group-title">六 · 开场</span>
       <div class="sheet-row">
         <span>第一幕从哪一刻开始</span>
         <textarea rows="2" data-f="opening" placeholder="例：百乐门二楼包厢，爵士乐刚换到第二支曲子。">${esc(builderSheet.opening || '')}</textarea>
       </div>
     </div>`;
-  $('#builder-groups').innerHTML = ideaBlock + groups + opening;
+  // 顺序：尺度 → 总设定 → 我的角色 → 核心角色们 → 总体关系 → 世界 → 开场
+  $('#builder-groups').innerHTML = modeBlock + ideaBlock + renderGroup('me') + castCards + addCast + renderGroup('relation') + renderGroup('world') + opening;
+}
+
+function renderGroup(key) {
+  const g = SHEET_GROUPS.find((x) => x.key === key);
+  if (!g) return '';
+  const fields = SHEET_SCHEMA[g.key].map((f) => `
+    <div class="sheet-row">
+      <span>${esc(f.label)}</span>
+      <textarea rows="${f.rows}" data-f="${g.key}.${f.key}" placeholder="${esc(f.ph)}">${esc(builderSheet[g.key][f.key] || '')}</textarea>
+    </div>`).join('');
+  return `<div class="sheet-group" data-group="${g.key}"><span class="sheet-group-title">${esc(g.title)}</span>${fields}</div>`;
 }
 
 function readBuilder() {
   $$('#builder-groups [data-f]').forEach((el) => {
     const path = el.dataset.f;
-    if (path === 'idea') { builderSheet.idea = el.value.trim(); return; }
-    if (path === 'opening') { builderSheet.opening = el.value.trim(); return; }
-    const [group, key] = path.split('.');
-    if (builderSheet[group]) builderSheet[group][key] = el.value.trim();
+    const v = el.value.trim();
+    if (path === 'idea') { builderSheet.idea = v; return; }
+    if (path === 'opening') { builderSheet.opening = v; return; }
+    const parts = path.split('.');
+    if (parts[0] === 'cast') {
+      const card = builderSheet.cast[Number(parts[1])];
+      if (card) card[parts[2]] = v;
+      return;
+    }
+    if (builderSheet[parts[0]]) builderSheet[parts[0]][parts[1]] = v;
   });
   return builderSheet;
 }
 
 function sheetToReadableText(sheet) {
-  const parts = SHEET_GROUPS.map((g) => {
-    const lines = SHEET_SCHEMA[g.key]
-      .map((f) => `  ${f.label}：${(sheet[g.key][f.key] || '').trim() || '（空）'}`)
-      .join('\n');
-    return `${g.title}\n${lines}`;
+  const s = normalizeSheet(sheet);
+  const dump = (fields, group) => fields
+    .map((f) => `  ${f.label}：${(group[f.key] || '').trim() || '（空）'}`)
+    .join('\n');
+  const blocks = [];
+  blocks.push(`二 · 我的角色\n${dump(SHEET_SCHEMA.me, s.me)}`);
+  s.cast.forEach((card, i) => {
+    blocks.push(`三 · 核心角色 ${i + 1}${card.name ? `（${card.name}）` : ''}\n${dump(CAST_FIELDS, card)}`);
   });
-  parts.push(`五 · 开场\n  第一幕从哪一刻开始：${(sheet.opening || '').trim() || '（空）'}`);
-  const idea = (sheet.idea || '').trim();
-  return `${idea ? `〇 · 总设定（玩家的原始构想，请以它为准展开，不要偏离）\n${idea}\n\n` : ''}${parts.join('\n\n')}`;
+  blocks.push(`四 · 总体关系\n${dump(SHEET_SCHEMA.relation, s.relation)}`);
+  blocks.push(`五 · 世界与剧情\n${dump(SHEET_SCHEMA.world, s.world)}`);
+  blocks.push(`六 · 开场\n  第一幕从哪一刻开始：${(s.opening || '').trim() || '（空）'}`);
+  const modeName = MODE_PRESETS[s.mode] ? `${MODE_PRESETS[s.mode].icon} ${MODE_PRESETS[s.mode].name}` : s.mode;
+  return `〇 · 尺度档位：${modeName}\n`
+    + `${s.idea ? `\n一 · 总设定（玩家的原始构想，请以它为准展开，不要偏离）\n${s.idea}\n` : ''}`
+    + `\n${blocks.join('\n\n')}`;
 }
 
 async function builderAiFill() {
@@ -497,11 +549,18 @@ async function builderAiFill() {
   btn.textContent = '正在补全…';
   $('#builder-note').innerHTML = 'AI 正在把你的要点扩写成完整角色卡，大概需要 20~60 秒…';
   try {
-    const res = await designSheet({ rough: sheetToReadableText(builderSheet) });
+    const mode = builderSheet.mode || 'balanced';
+    const res = await designSheet({
+      rough: sheetToReadableText(builderSheet),
+      mode,
+      intensity: MODE_PRESETS[mode]?.intensity || ''
+    });
     if (res.ok) {
-      const keptIdea = builderSheet.idea;      // 总设定要留着，AI 只负责拆解
+      const keptIdea = builderSheet.idea;      // 总设定与尺度要留着，AI 只负责拆解
+      const keptMode = mode;
       builderSheet = res.sheet;
       builderSheet.idea = keptIdea;
+      builderSheet.mode = keptMode;
       renderBuilder();
       $('#builder-note').innerHTML = '✅ 已补全。可以再手动改，改完点下面保存。';
     } else {
@@ -679,7 +738,15 @@ function bindSetup() {
     openBuilder({
       sheet: draft.sheet,
       fromSetup: true,
-      onSave: (sheet) => { draft.sheet = sheet; applySheetToDraft(); }
+      mode: draft.mode || 'balanced',
+      onSave: (sheet, mode) => {
+        draft.sheet = sheet;
+        if (mode) {
+          draft.mode = mode;
+          draft.intensity = MODE_PRESETS[mode]?.intensity || draft.intensity;
+        }
+        applySheetToDraft();
+      }
     });
   });
   $('#builder-close').addEventListener('click', () => {
@@ -687,6 +754,28 @@ function bindSetup() {
     if (builderFromSetup) $('#screen-setup').classList.add('open');
   });
   $('#builder-ai').addEventListener('click', builderAiFill);
+  $('#builder-groups').addEventListener('click', (e) => {
+    const modeChip = e.target.closest('[data-bm]');
+    if (modeChip) {
+      readBuilder();
+      builderSheet.mode = modeChip.dataset.bm;
+      renderBuilder();
+      return;
+    }
+    if (e.target.closest('#add-cast')) {
+      readBuilder();
+      if (builderSheet.cast.length < MAX_CAST) builderSheet.cast.push(emptyCastCard());
+      renderBuilder();
+      return;
+    }
+    const del = e.target.closest('[data-del-cast]');
+    if (del) {
+      readBuilder();
+      builderSheet.cast.splice(Number(del.dataset.delCast), 1);
+      if (!builderSheet.cast.length) builderSheet.cast.push(emptyCastCard());
+      renderBuilder();
+    }
+  });
   $('#builder-save').addEventListener('click', () => {
     const sheet = readBuilder();
     if (sheetOnlyHasIdea(sheet)) {
@@ -1332,8 +1421,13 @@ function openWriting() {
       openBuilder({
         sheet: s.setup.sheet,
         fromSetup: false,
-        onSave: (sheet) => {
+        mode: modeOf(s.setup),
+        onSave: (sheet, mode) => {
           s.setup.sheet = sheet;
+          if (mode) {
+            s.setup.mode = mode;
+            s.setup.intensity = MODE_PRESETS[mode]?.intensity || s.setup.intensity;
+          }
           const parts = sheetToSetupParts(sheet);
           if (parts.userRole) s.setup.userRole = parts.userRole;
           if (parts.targetRole) s.setup.targetRole = parts.targetRole;

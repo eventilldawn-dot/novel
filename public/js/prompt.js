@@ -2,7 +2,7 @@
  * prompt.js — 提示词构建 + 模型输出解析（含流式增量解析）
  */
 
-import { SHEET_SCHEMA, normalizeSheet } from './sheet.js';
+import { SHEET_SCHEMA, CAST_FIELDS, normalizeSheet } from './sheet.js';
 
 const JSON_SPEC = `{
   "scene": {
@@ -52,20 +52,32 @@ export function buildSheetBlock(sheet) {
     if (lines.length) parts.push(`【${title}】\n${lines.join('\n')}`);
   };
   dump('玩家扮演的角色', s.me, SHEET_SCHEMA.me);
-  dump('核心角色（你负责演他）', s.them, SHEET_SCHEMA.them);
-  dump('两人的关系', s.relation, SHEET_SCHEMA.relation);
+  const cast = s.cast.filter((card) => CAST_FIELDS.some((f) => (card[f.key] || '').trim()));
+  cast.forEach((card, i) => {
+    const who = card.name ? `${i + 1}：${card.name}` : `${i + 1}`;
+    dump(`核心角色 ${who}（你负责演他）`, card, CAST_FIELDS);
+  });
+  dump('这几个角色与「我」之间的总体关系', s.relation, SHEET_SCHEMA.relation);
   dump('世界与剧情', s.world, SHEET_SCHEMA.world);
   if (s.opening) parts.push(`【开场】\n${s.opening}`);
   if (!parts.length) return '';
-  return `【角色卡 · 本作的权威设定，必须严格遵守】\n下面每一条都是玩家亲自定下的。不得遗忘、混淆、简化或擅自增改；人物的说话方式、习惯动作、软肋与关系都必须与它一致。写每一轮之前先回想一遍。\n\n${parts.join('\n\n')}`;
+  const castNote = cast.length > 1
+    ? `\n本作有 ${cast.length} 个核心角色。你要分别演出他们每一个人：各有各的说话方式、习惯动作与立场，不要把他们写成一个腔调，也不要让他们互相混淆或性格串味。`
+    : '';
+  return `【角色卡 · 本作的权威设定，必须严格遵守】\n下面每一条都是玩家亲自定下的。不得遗忘、混淆、简化或擅自增改；人物的说话方式、习惯动作、软肋与关系都必须与它一致。写每一轮之前先回想一遍。${castNote}\n\n${parts.join('\n\n')}`;
 }
 
-/** 让模型把粗略要点扩写成一份完整的角色卡 */
-export function buildSheetMessages(rough) {
-  const keys = Object.entries(SHEET_SCHEMA)
-    .map(([group, fields]) => `  "${group}": { ${fields.map((f) => `"${f.key}": "${f.label}"`).join(', ')} }`)
-    .join(',\n');
-  const system = `你是角色设定师。玩家会给你一些粗略的点子，你要把它补全成一份具体、自洽、可以直接开演的角色卡。
+function jsonFields(fields) {
+  return fields.map((f) => `"${f.key}": "${f.label}"`).join(', ');
+}
+
+/** 让模型把粗略要点扩写成一份（或几份）完整的角色卡 */
+export function buildSheetMessages(rough, opts = {}) {
+  const mode = opts.mode || 'balanced';
+  const intensity = String(opts.intensity || '').trim();
+  const adultMode = mode !== 'story';
+
+  const system = `你是角色设定师。玩家会给你一些粗略的点子，你要把它补全成具体、自洽、可以直接开演的一整套角色卡。
 
 要求：
 1. 每个字段 20-80 字，写具体的细节（尺寸、物件、口癖、明确的欲望与恐惧），不要写空泛的形容词堆砌。
@@ -73,17 +85,31 @@ export function buildSheetMessages(rough) {
 3. 各字段之间必须自洽：外貌、过往、软肋要能互相解释。
 4. 玩家已经写了的内容要保留原意，只做扩写和补全，不要推翻。
 5. 如果给了「〇 · 总设定」，它就是最高依据：人物、关系、世界观都必须从它长出来，不要另起一套。
-6. 全部用中文；字符串里不要出现英文双引号，需要引用时用「」。
+6. **核心角色的数量由剧情决定**：玩家提到几个人就写几张卡（通常 1-4 张）。攻略多位角色、群像、只有一个对手戏对象都行。人数不要硬凑，也不要擅自合并成一个人。
+7. 每一个核心角色都必须彼此区分：不同的外貌、不同的说话方式、不同的软肋。不要把几个人写成同一个模子。
+8. 每个核心角色的 relation 字段只写「他和玩家角色的关系」，不要写别人和他的关系。
+${adultMode ? '9. 这是成年向的虚构设定。凡是涉及性、欲望、身体关系、羞耻与征服的内容，都要如实写进人设里（写进 drive / weakness / relation / habit 都行）：不要回避、不要淡化、不要改成"两人只是朋友"、不要把明确的性关系写成暧昧暗示。人设写得越诚实，开演后越不会跑偏。' : ''}
+10. 全部用中文；字符串里不要出现英文双引号，需要引用时用「」。
 
 只输出 JSON，第一个字符必须是 {。结构：
 {
-${keys},
+  "me": { ${jsonFields(SHEET_SCHEMA.me)} },
+  "cast": [
+    { ${jsonFields(CAST_FIELDS)} }
+  ],
+  "relation": { ${jsonFields(SHEET_SCHEMA.relation)} },
+  "world": { ${jsonFields(SHEET_SCHEMA.world)} },
   "opening": "第一幕从哪一刻开始，一到两句"
 }`;
   const roughText = typeof rough === 'string' ? rough : JSON.stringify(rough, null, 1);
   return [
     { role: 'system', content: system },
-    { role: 'user', content: `以下是我现在有的点子（可能很粗糙，也可能只有一部分）：\n\n${roughText}\n\n请补全成完整的角色卡 JSON。` }
+    {
+      role: 'user',
+      content: `以下是我现在有的点子（可能很粗糙，也可能只有一部分）：\n\n${roughText}\n\n`
+        + `请补全成完整的角色卡 JSON。记住：核心角色有几个由这份设定决定，不要硬凑成两个。`
+        + (intensity ? `\n\n【本作的尺度设定】${intensity}` : '')
+    }
   ];
 }
 
