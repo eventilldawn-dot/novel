@@ -146,7 +146,25 @@ async function flushPush() {
   state.sync.busy = true;
   updateSyncUI();
   try {
-    await syncApi.push(payload);
+    const res = await syncApi.push(payload);
+    // 服务器会把合并后的完整数据回传 —— 用它更新本机，避免本机缺着别端的轮次
+    if (Array.isArray(res?.sessions) && res.sessions.length) {
+      const merged = syncApi.mergeSessions(store.listSessions(), res.sessions);
+      store.replaceAll(merged);
+      renderSessionList();
+      if (state.session) {
+        const fresh = merged.find((x) => x.id === state.session.id);
+        if (fresh && (fresh.rounds?.length || 0) !== (state.session.rounds?.length || 0)) {
+          state.session = fresh;
+          ui.renderRounds(state.session, { futureCount: state.session.rounds.length - 1 - state.session.cursor });
+          ui.renderHUD(state.session);
+          ui.renderRoundNav(state.session);
+          ui.toast(`已同步到最新：${fresh.rounds.length} 轮`);
+        } else if (fresh) {
+          state.session = fresh;
+        }
+      }
+    }
     syncApi.clearError();
   } catch (err) {
     syncApi.markError(err.message);

@@ -110,7 +110,8 @@ export async function version() {
   }
 }
 
-const KEY_VERSION = 'novel.storeVersion.v1';
+// 换 key 名 = 让所有设备强制做一次全量拉取，修掉之前"跳过下载"留下的陈旧副本
+const KEY_VERSION = 'novel.storeVersion.v2';
 export const lastVersion = {
   get() { try { return localStorage.getItem(KEY_VERSION) || ''; } catch { return ''; } },
   set(v) { try { localStorage.setItem(KEY_VERSION, String(v || '')); } catch { /* ignore */ } }
@@ -121,7 +122,8 @@ export async function push({ sessions = [], deleted = [] }) {
   const res = await fetch(`${state.base}/api/store`, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ sessions, deleted })
+    // echo: 让服务器把"合并后的完整结果"回传 —— 否则本机可能一直缺着别端的轮次
+    body: JSON.stringify({ sessions, deleted, echo: true })
   });
   if (res.status === 403) throw new Error('同步口令不正确');
   if (!res.ok) throw new Error(`服务返回 ${res.status}`);
