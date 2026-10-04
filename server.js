@@ -483,9 +483,49 @@ async function handleChat(req, res) {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no'
     });
+
+    // 关键：推理模型的"思考"也是逐 token 流式过来的，每个事件约 250 字节。
+    // 一次生成能产生近 1MB 的思考数据，而前端只需要正文 —— 手机上这纯属浪费带宽。
+    // 这里把 reasoning_content 与空 delta 全部丢掉，只转发正文增量。
+    const forward = (obj) => {
+      try {
+        const choice = obj?.choices?.[0];
+        if (!choice) return;
+        const delta = choice.delta || {};
+        delete delta.reasoning_content;
+        const hasContent = typeof delta.content === 'string' && delta.content.length;
+        if (!hasContent && !choice.finish_reason) return;
+        res.write(`data: ${JSON.stringify({ choices: [{ delta, finish_reason: choice.finish_reason ?? null }] })}\n\n`);
+      } catch {
+        /* 忽略无法解析的行 */
+      }
+    };
+
+    const decoder = new TextDecoder('utf-8');
+    let sseBuf = '';
+    let lastBeat = Date.now();
     try {
       for await (const chunk of upstream.body) {
-        res.write(chunk);
+        sseBuf += decoder.decode(chunk, { stream: true });
+        const lines = sseBuf.split('\n');
+        sseBuf = lines.pop() ?? '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data:')) continue;
+          const payload = trimmed.slice(5).trim();
+          if (!payload) continue;
+          if (payload === '[DONE]') { res.write('data: [DONE]\n\n'); continue; }
+          try {
+            forward(JSON.parse(payload));
+          } catch {
+            /* 上游偶发的非 JSON 行，忽略 */
+          }
+        }
+        // 长时间只有思考、没有正文时，发个心跳避免中间层超时断连
+        if (Date.now() - lastBeat > 5000) {
+          lastBeat = Date.now();
+          res.write(': keepalive\n\n');
+        }
       }
     } catch (err) {
       res.write(`data: ${JSON.stringify({ novelError: err.message })}\n\n`);
