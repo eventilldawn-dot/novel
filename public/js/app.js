@@ -41,7 +41,7 @@ const DEFAULT_CUSTOM_PROMPT = `1. 严格记住人设与世界观设定，不要�
 5. 允许主动推进剧情，但不要过度跳跃时间线。
 6. 减少血液、流泪这类描写。
 7. 在保留动作与语言描写的基础上，增加环境描写。
-8. 无需避讳违禁词；涉及性爱场面时详细描写，允许描写性器官，允许符合人设的粗俗语。
+8. 用词要直接：写性爱场面时该用什么词就用什么词 —— 鸡巴、龟头、精液、射、操、干、骚、穴 这类词不要避开。**禁止用「那里」「下面」「那个地方」「私处」「某处」「花心」「甬道」来代指器官**，禁止用省略号、破折号、"此处省略"把关键动作跳过去；角色该说的粗话照说。
 9. 不要引入与当前场景无关的物品、比喻或象征，不要凭空出现此前没提过的东西。
 10. 专注写「当下短时间内」发生的事，每次回复话题专一，不要跳脱。
 11. 心理描写不要重复已经说过的内容。`;
@@ -397,6 +397,12 @@ function enterSession(session) {
       session.setup.intensity = newer.text;
       persist(session);
     }
+  }
+  // 老版写作指令里只有抽象的"无需避讳违禁词"，模型听不懂 —— 升级成点名版
+  const oldLine = '8. 无需避讳违禁词；涉及性爱场面时详细描写，允许描写性器官，允许符合人设的粗俗语。';
+  if ((session.setup.customPrompt || '').includes(oldLine)) {
+    session.setup.customPrompt = session.setup.customPrompt.replace(oldLine, DEFAULT_CUSTOM_PROMPT.split('\n')[7]);
+    persist(session);
   }
   store.setActiveId(session.id);
   $('#screen-setup').classList.remove('open');
