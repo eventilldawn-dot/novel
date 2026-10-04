@@ -3,6 +3,8 @@
  */
 
 import { EMOTION_PALETTE } from './presets.js';
+import { MODE_PRESETS } from './presets.js';
+import { modeOf } from './prompt.js';
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -243,9 +245,12 @@ export function setJumpButton(visible) {
 export function renderTopActions(setup, activeId) {
   const host = $('#top-actions');
   const panels = setup.topPanels || [];
+  const mode = MODE_PRESETS[modeOf(setup)] || MODE_PRESETS.balanced;
   host.innerHTML = panels.map((p) => `
     <button class="mini-btn${activeId === p.id ? ' active' : ''}" data-panel="${esc(p.id)}">${esc(p.label)}</button>
-  `).join('') + `<button class="mini-btn" data-open-writing title="修改本剧的尺度与写作指令">✍ 写作</button>`
+  `).join('')
+    + `<button class="mini-btn mode-btn" data-open-mode title="切换尺度模式">${mode.icon} ${esc(mode.name)}</button>`
+    + `<button class="mini-btn" data-open-writing title="修改本剧的尺度与写作指令">✍ 写作</button>`
     + `<button class="mini-btn" data-open-settings title="设置">⚙</button>`;
 }
 

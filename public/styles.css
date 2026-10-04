@@ -425,6 +425,27 @@ button { cursor: pointer; border: none; background: none; }
 .builder-entry .be-title { font-size: 14px; color: var(--gold); letter-spacing: .06em; }
 .builder-entry .be-desc { font-size: 12px; line-height: 1.7; color: var(--text-dim); }
 
+.mode-btn { color: var(--gold); border-color: rgba(216, 180, 120, .3); }
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+  padding: 13px 15px;
+  margin-bottom: 9px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, .025);
+  color: var(--text-2);
+  transition: .16s;
+}
+.mode-card:hover { border-color: rgba(216, 180, 120, .4); background: rgba(216, 180, 120, .08); }
+.mode-card.active { border-color: rgba(216, 180, 120, .55); background: var(--gold-soft); }
+.mode-card b { font-size: 14.5px; color: var(--text); font-weight: 500; }
+.mode-card.active b { color: var(--gold); }
+.mode-card span { font-size: 12px; line-height: 1.65; color: var(--text-dim); }
+
 .sheet-group { margin-bottom: 24px; }
 .sheet-idea {
   padding: 14px 14px 10px;

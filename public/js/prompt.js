@@ -91,7 +91,8 @@ export function buildSystemPrompt(setup, opts = {}) {
   const emotions = (setup.emotions || []).join('、');
   const lengthHint = setup.lengthHint || '控制在 350-500 字，有场景与对白。';
   const intensity = setup.intensity || '成人向的文学化描写，重心理与氛围，避免直白的器官词与粗俗表达';
-  const adultMode = !/全年龄/.test(intensity);
+  const mode = modeOf(setup);
+  const adultMode = mode === 'explicit';
   const sheetBlock = buildSheetBlock(setup.sheet);
   const base = `你是「Novel」的导演引擎 —— 一位功力深厚的中文互动小说作者，负责推进一部沉浸式文字剧情。
 
@@ -159,6 +160,16 @@ ${JSON_SPEC}
 }
 
 /** 文风样例是不是乱码（编码搞错、复制错源都会这样）——乱码样例会让模型彻底跑偏 */
+/** 判定当前尺度模式：优先用显式设置的 mode，老剧情则从尺度文案推断 */
+export function modeOf(setup) {
+  const m = setup?.mode;
+  if (m === 'story' || m === 'balanced' || m === 'explicit') return m;
+  const t = String(setup?.intensity || '');
+  if (/全年龄|剧情为主|自然带过/.test(t)) return 'story';
+  if (/感官细腻|并重/.test(t)) return 'balanced';
+  return 'explicit';
+}
+
 export function looksGarbled(text) {
   const s = String(text || '');
   if (!s) return false;
@@ -204,11 +215,13 @@ export function buildMessages(session, cursor, opts = {}) {
       : '';
 
   // 尺度提醒放在每轮的最后（模型对结尾的指令最敏感）
-  const adult = !/全年龄/.test(setup.intensity || '');
-  const scaleNote = adult
-    ? `\n〔本轮尺度〕按角色卡与设定里的尺度直接写：涉及性爱场面就写动作、体感、身体反应与对话，写完整，不省略、不淡出。`
-    : '';
-  const firstNote = (adult && rounds.length === 0) ? '（这是第一轮，就把写法基调立起来。）' : '';
+  const mode = modeOf(setup);
+  const scaleNote = mode === 'explicit'
+    ? '\n〔本轮尺度〕按角色卡与设定里的尺度直接写：涉及性爱场面就写动作、体感、身体反应与对话，写完整，不省略、不淡出。'
+    : mode === 'balanced'
+      ? '\n〔本轮尺度〕亲密场面按剧情需要自然写出来，不必刻意回避，也不用为了写而写。'
+      : '';
+  const firstNote = (mode === 'explicit' && rounds.length === 0) ? '（这是第一轮，就把写法基调立起来。）' : '';
   // 第一轮把完整写作指令再以「玩家的话」发一遍：模型对 user 消息的遵守度通常高于 system
   const userWritingNote = (rounds.length === 0 && setup.customPrompt)
     ? `\n\n【我的写作要求（请照做）】\n${setup.customPrompt}`

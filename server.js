@@ -46,7 +46,7 @@ function loadConfig() {
 
 async function saveConfig(patch) {
   const next = { ...config };
-  for (const key of ['baseUrl', 'apiKey', 'model', 'systemExtra', 'syncToken', 'styleSample']) {
+  for (const key of ['baseUrl', 'apiKey', 'model', 'systemExtra', 'syncToken', 'styleSample', 'defaultMode']) {
     if (typeof patch[key] === 'string') next[key] = patch[key].trim();
   }
   for (const key of ['temperature', 'maxTokens', 'timeoutMs']) {
@@ -296,6 +296,7 @@ function publicConfig() {
     stream: config.stream,
     jsonMode: config.jsonMode,
     styleSample: config.styleSample || '',
+    defaultMode: config.defaultMode || 'balanced',
     hasKey: Boolean(config.apiKey),
     keyPreview: config.apiKey ? `${config.apiKey.slice(0, 4)}····${config.apiKey.slice(-4)}` : ''
   };

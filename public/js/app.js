@@ -4,13 +4,14 @@
 
 import {
   TEMPLATES, EMOTION_PRESETS, LENGTH_PRESETS, TONE_PRESETS, POV_PRESETS,
-  PANEL_LIBRARY, makePanel, cloneTemplate, suggestSetupLocal
+  PANEL_LIBRARY, makePanel, cloneTemplate, suggestSetupLocal,
+  MODE_PRESETS, MODE_ORDER, INTENSITY_MODE_MAP
 } from './presets.js';
 import { store, newSession } from './store.js';
 import * as syncApi from './sync.js';
 import { SHEET_SCHEMA, emptySheet, normalizeSheet, sheetToSetupParts, sheetIsEmpty } from './sheet.js';
 import { sheetOnlyHasIdea } from './sheet.js';
-import { looksGarbled } from './prompt.js';
+import { looksGarbled, modeOf } from './prompt.js';
 import {
   generateRound, server, designSetup, testConnection,
   localConfig, PROVIDERS, probeServer, resolveTransport, designSheet
@@ -76,6 +77,7 @@ async function boot() {
   const cfg = await server.getConfig();
   state.serverCfg = cfg.config || {};
   if (state.serverCfg.styleSample) localConfig.write({ styleSample: state.serverCfg.styleSample });
+  if (state.serverCfg.defaultMode) localConfig.write({ defaultMode: state.serverCfg.defaultMode });
 
   const activeId = store.activeId();
   const session = activeId ? store.getSession(activeId) : null;
@@ -338,6 +340,7 @@ function enterSession(session) {
 
 function blankSetup() {
   const t = cloneTemplate(TEMPLATES[TEMPLATES.length - 1]);
+  const defaultMode = localConfig.read().defaultMode || 'balanced';
   return {
     templateId: t.id,
     emoji: t.emoji,
@@ -350,7 +353,8 @@ function blankSetup() {
     pov: t.pov,
     lengthKey: 'medium',
     emotions: [...t.emotions],
-    intensity: INTENSITY[1].text,
+    intensity: MODE_PRESETS[defaultMode].intensity,
+    mode: defaultMode,
     customPrompt: DEFAULT_CUSTOM_PROMPT,
     idea: '',
     sheet: emptySheet(),
@@ -659,6 +663,7 @@ function collectSetup() {
     lengthHint: (LENGTH_PRESETS[draft.lengthKey] || LENGTH_PRESETS.medium).hint,
     emotions: draft.emotions.length ? draft.emotions : ['好感度', '愉悦度', '羞耻度', '痛苦', '沉溺'],
     intensity: draft.intensity,
+    mode: draft.mode || 'balanced',
     customPrompt: draft.customPrompt,
     idea: draft.idea || draft.sheet?.idea || '',
     sheet: draft.sheet,
@@ -1032,6 +1037,7 @@ function bindGlobal() {
   $('#top-actions').addEventListener('click', (e) => {
     if (e.target.closest('[data-open-settings]')) { openSettings(); return; }
     if (e.target.closest('[data-open-writing]')) { openWriting(); return; }
+    if (e.target.closest('[data-open-mode]')) { openMode(); return; }
     const btn = e.target.closest('[data-panel]');
     if (btn) openPanel(btn.dataset.panel);
   });
@@ -1178,6 +1184,43 @@ function regenerate() {
    ========================================================= */
 
 /** 修改当前剧情的尺度与写作指令（不必重开一局） */
+/** 一键切换「这一步想怎么写」：剧情为主 / 平衡 / 直球 */
+function applyMode(session, key) {
+  const m = MODE_PRESETS[key];
+  if (!m || !session) return;
+  session.setup.mode = key;
+  session.setup.intensity = m.intensity;
+  persist(session);
+  ui.renderTopActions(session.setup, state.activePanel);
+}
+
+function openMode() {
+  const s = state.session;
+  if (!s) return;
+  const cur = modeOf(s.setup);
+  ui.openModal(`
+    <h3>这一步想怎么写？</h3>
+    ${MODE_ORDER.map((k) => {
+      const m = MODE_PRESETS[k];
+      return `<button class="mode-card${k === cur ? ' active' : ''}" data-mode="${k}">
+        <b>${m.icon} ${esc(m.name)}</b>
+        <span>${esc(m.desc)}</span>
+      </button>`;
+    }).join('')}
+    <div class="tip">只影响这一部剧情，下一轮生效。想改所有新剧情的默认值，去 <b>⚙ 设置 → 默认尺度模式</b>。</div>
+    <div class="row"><button class="cancel" data-close-modal>关闭</button></div>
+  `, (modal) => {
+    modal.addEventListener('click', (e) => {
+      const card = e.target.closest('[data-mode]');
+      if (!card) return;
+      applyMode(s, card.dataset.mode);
+      ui.renderTopActions(s.setup, state.activePanel);
+      ui.closeModal();
+      ui.toast(`已切到「${MODE_PRESETS[card.dataset.mode].name}」，下一轮生效。`);
+    });
+  });
+}
+
 function renameSession() {
   const s = state.session;
   if (!s) return;
@@ -1217,6 +1260,12 @@ function openWriting() {
   ui.openModal(`
     <h3>本剧的尺度与写作指令</h3>
     <div class="field">
+      <label class="field-label">尺度模式<span class="field-hint">一键切换，下面的细档会自动跟着变</span></label>
+      <div class="chip-row" id="w-modes">
+        ${MODE_ORDER.map((k) => `<button class="chip${modeOf(s.setup) === k ? ' active' : ''}" data-m="${k}">${MODE_PRESETS[k].icon} ${esc(MODE_PRESETS[k].name)}</button>`).join('')}
+      </div>
+    </div>
+    <div class="field">
       <label class="field-label">内容尺度</label>
       <div class="chip-row" id="w-intensity">
         ${INTENSITY.map((it) => `<button class="chip${cur === it.text ? ' active' : ''}" data-w="${esc(it.label)}">${esc(it.label)}</button>`).join('')}
@@ -1244,6 +1293,17 @@ function openWriting() {
     </div>
   `, (modal) => {
     let picked = cur;
+    let pickedMode = modeOf(s.setup);
+    modal.querySelector('#w-modes').addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-m]');
+      if (!chip) return;
+      pickedMode = chip.dataset.m;
+      picked = MODE_PRESETS[pickedMode].intensity;
+      modal.querySelectorAll('#w-modes .chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      modal.querySelectorAll('#w-intensity .chip').forEach((c) => c.classList.toggle('active', c.dataset.w === '无限制' && pickedMode === 'explicit'));
+      modal.querySelector('#w-intensity-text').textContent = picked;
+    });
     let pickedLen = s.setup.lengthHint || '';
     modal.querySelector('#w-length').addEventListener('click', (e) => {
       const chip = e.target.closest('[data-len]');
@@ -1258,6 +1318,8 @@ function openWriting() {
       const item = INTENSITY.find((x) => x.label === chip.dataset.w);
       if (!item) return;
       picked = item.text;
+      pickedMode = INTENSITY_MODE_MAP[item.label] || pickedMode;
+      modal.querySelectorAll('#w-modes .chip').forEach((c) => c.classList.toggle('active', c.dataset.m === pickedMode));
       modal.querySelectorAll('#w-intensity .chip').forEach((c) => c.classList.remove('active'));
       chip.classList.add('active');
       modal.querySelector('#w-intensity-text').textContent = item.text;
@@ -1284,6 +1346,7 @@ function openWriting() {
     });
     modal.querySelector('#w-save').addEventListener('click', () => {
       s.setup.intensity = picked;
+      s.setup.mode = pickedMode;
       if (pickedLen) s.setup.lengthHint = pickedLen;
       s.setup.customPrompt = modal.querySelector('#w-custom').value.trim();
       persist(s);
@@ -1388,6 +1451,12 @@ async function openSettings() {
       <label class="field-label">调用方式</label>
       <div class="chip-row" id="s-modes">
         ${Object.entries(modeLabels).map(([k, v]) => `<button class="chip${mode === k ? ' active' : ''}" data-mode="${k}">${esc(v)}</button>`).join('')}
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label">默认尺度模式<span class="field-hint">新建剧情时的默认值（老剧情不受影响）</span></label>
+      <div class="chip-row" id="s-default-mode">
+        ${MODE_ORDER.map((k) => `<button class="chip${(local.defaultMode || 'balanced') === k ? ' active' : ''}" data-dm="${k}">${MODE_PRESETS[k].icon} ${esc(MODE_PRESETS[k].name)}</button>`).join('')}
       </div>
     </div>
     <div class="field">
@@ -1502,6 +1571,13 @@ async function openSettings() {
         .map((m) => `<button class="chip" data-pick-model="${esc(m)}">${esc(m)}</button>`).join('');
     });
 
+    modal.querySelector('#s-default-mode').addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-dm]');
+      if (!chip) return;
+      modal.querySelectorAll('#s-default-mode .chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
+
     modal.querySelector('#s-model-pick').addEventListener('click', (e) => {
       const chip = e.target.closest('[data-pick-model]');
       if (!chip) return;
@@ -1551,6 +1627,7 @@ async function openSettings() {
         maxTokens: f.maxTokens, stream: f.stream, jsonMode: f.jsonMode, mode: f.mode
       };
       patch.styleSample = modal.querySelector('#s-style').value.trim();
+      patch.defaultMode = modal.querySelector('#s-default-mode .chip.active')?.dataset.dm || 'balanced';
       if (looksGarbled(patch.styleSample)) {
         ui.toast('⚠ 这段文风样例看起来是乱码（编码不对），已忽略它 —— 请重新复制一段正常的文本。', 'warn');
       }
