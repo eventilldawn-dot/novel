@@ -1,4 +1,4 @@
-# tunnel.ps1 — 一键把本机服务发布到公网（Cloudflare 免费隧道，免注册免域名）
+﻿# tunnel.ps1 — 一键把本机服务发布到公网（Cloudflare 免费隧道，免注册免域名）
 # 用法：双击 tunnel.bat，或在 PowerShell 里执行 .\tunnel.ps1
 
 $ErrorActionPreference = "Stop"
