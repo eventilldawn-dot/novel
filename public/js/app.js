@@ -415,6 +415,7 @@ function followScroll(instant) {
 }
 
 async function bootSync() {
+  updateSyncUI();   // 先亮出状态，别让用户盯着空白的侧栏等
   const ok = await syncApi.initSync();
   updateSyncUI();
   if (!ok) return;

@@ -90,8 +90,11 @@ function headers() {
 }
 
 async function probe(base) {
+  // 地址失效（比如旧的穿透地址）时不能让整个页面一直等，最多 2.5 秒
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 2500);
   try {
-    const res = await fetch(`${base}/api/health`, { headers: headers(), cache: 'no-store' });
+    const res = await fetch(`${base}/api/health`, { headers: headers(), cache: 'no-store', signal: ctrl.signal });
     if (!res.ok) {
       lastProbeReason = res.status === 403 ? '口令不对' : `HTTP ${res.status}`;
       return null;
@@ -101,8 +104,10 @@ async function probe(base) {
     return data;
   } catch (err) {
     // 跨域被拦、DNS 失败、证书问题都会走到这里
-    lastProbeReason = err?.message || '网络错误';
+    lastProbeReason = err?.name === 'AbortError' ? '连接超时' : (err?.message || '网络错误');
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
