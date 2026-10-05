@@ -204,7 +204,17 @@ export function pickSession(a, b) {
 }
 
 /** 合并两份数据（游标保留本机的 —— 你看到第几轮是每台设备自己的事） */
-export function mergeSessions(local, remote) {
+/** 应用"删除墓碑"：被删过的剧情不会因为另一端还留着就复活 */
+export function applyTombstones(sessions, tombstoned) {
+  if (!Array.isArray(tombstoned) || !tombstoned.length) return sessions || [];
+  const tomb = new Map(tombstoned.map((d) => [d.id, d.at || 0]));
+  return (sessions || []).filter((s) => {
+    const at = tomb.get(s?.id);
+    return !(at && (s.updatedAt || 0) <= at);
+  });
+}
+
+export function mergeSessions(local, remote, tombstoned) {
   const map = new Map();
   const localCursor = new Map();
   for (const s of local || []) {
@@ -216,7 +226,7 @@ export function mergeSessions(local, remote) {
     if (!s?.id) continue;
     map.set(s.id, pickSession(map.get(s.id), s));
   }
-  const out = Array.from(map.values()).map((s) => {
+  const out = applyTombstones(Array.from(map.values()), tombstoned).map((s) => {
     if (!localCursor.has(s.id) || !Array.isArray(s.rounds) || !s.rounds.length) return s;
     const want = localCursor.get(s.id);
     if (!Number.isFinite(want)) return s;

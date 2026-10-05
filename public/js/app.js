@@ -149,7 +149,7 @@ async function flushPush() {
     const res = await syncApi.push(payload);
     // 服务器会把合并后的完整数据回传 —— 用它更新本机，避免本机缺着别端的轮次
     if (Array.isArray(res?.sessions) && res.sessions.length) {
-      const merged = syncApi.mergeSessions(store.listSessions(), res.sessions);
+      const merged = syncApi.mergeSessions(store.listSessions(), res.sessions, res.deleted || []);
       if (!store.replaceAll(merged)) syncApi.markError('本机浏览器存储已满，已用服务端数据覆盖');
       renderSessionList();
       if (state.session) {
@@ -202,7 +202,7 @@ async function bootSync() {
       return;
     }
     const remote = await syncApi.pull();
-    const merged = syncApi.mergeSessions(store.listSessions(), remote.sessions || []);
+    const merged = syncApi.mergeSessions(store.listSessions(), remote.sessions || [], remote.deleted || []);
     store.replaceAll(merged);
     // 把本机独有的（比如之前在浏览器里写的）补推上去
     await syncApi.push({ sessions: merged, deleted: [] });
@@ -224,7 +224,7 @@ async function runFullSync() {
   updateSyncUI();
   try {
     const remote = await syncApi.pull();
-    const merged = syncApi.mergeSessions(store.listSessions(), remote.sessions || []);
+    const merged = syncApi.mergeSessions(store.listSessions(), remote.sessions || [], remote.deleted || []);
     store.replaceAll(merged);
     await syncApi.push({ sessions: merged, deleted: [] });
     syncApi.clearError();

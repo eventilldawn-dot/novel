@@ -159,18 +159,24 @@ async function loadStore() {
   try {
     const raw = await fsp.readFile(STORE_FILE, 'utf8');
     const parsed = JSON.parse(raw);
-    storeCache = { updatedAt: parsed.updatedAt || 0, sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [] };
+    storeCache = {
+      updatedAt: parsed.updatedAt || 0,
+      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
+      deleted: Array.isArray(parsed.deleted) ? parsed.deleted : []   // 删除墓碑
+    };
     storeLoadFailed = false;
   } catch (err) {
     if (err && err.code === 'ENOENT') {
       // 首次运行：文件还不存在，这是正常的
       storeCache = { updatedAt: 0, sessions: [] };
+      storeCache.deleted = [];
       storeLoadFailed = false;
     } else {
       // 读到了但解析失败（例如正被写入）——**绝不能当作空数据**，
       // 否则下一次写入就会把用户所有剧情覆盖掉
       console.error('[novel] 数据文件读取失败，已进入保护模式（不会写回）:', err.message);
       storeCache = { updatedAt: 0, sessions: [] };
+      storeCache.deleted = [];
       storeLoadFailed = true;
     }
   }
@@ -276,13 +282,27 @@ function pickSession(a, b) {
 
 /** 合并：同 id 逐轮并集；deleted 里的 id 直接删掉 */
 function mergeStore(incoming, deleted) {
+  const now = Date.now();
+  storeCache.deleted = Array.isArray(storeCache.deleted) ? storeCache.deleted : [];
+  // 记下"删除墓碑"：某个 id 在什么时刻被删过
+  for (const id of deleted || []) {
+    const hit = storeCache.deleted.find((d) => d.id === id);
+    if (hit) hit.at = now;
+    else storeCache.deleted.push({ id, at: now });
+  }
+  const tomb = new Map(storeCache.deleted.map((d) => [d.id, d.at || 0]));
+
   const map = new Map((storeCache?.sessions || []).map((s) => [s.id, s]));
   for (const id of deleted || []) map.delete(id);
   for (const s of incoming || []) {
     if (!s || !s.id) continue;
+    // 已被删除、且这份副本不比删除时刻更新 → 不复活
+    const deadAt = tomb.get(s.id);
+    if (deadAt && (s.updatedAt || 0) <= deadAt) continue;
     map.set(s.id, pickSession(map.get(s.id), s));
   }
   storeCache.sessions = Array.from(map.values()).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  storeCache.deleted = storeCache.deleted.slice(-200);   // 墓碑只留最近 200 条
   return storeCache;
 }
 
@@ -355,7 +375,9 @@ async function handleStore(req, res, pathname) {
   }
   if (req.method === 'GET') {
     const store = await loadStore();
-    return sendJson(res, 200, { ok: true, updatedAt: store.updatedAt, sessions: store.sessions }, req);
+    return sendJson(res, 200, {
+      ok: true, updatedAt: store.updatedAt, sessions: store.sessions, deleted: store.deleted || []
+    }, req);
   }
   if (req.method === 'POST' || req.method === 'PUT') {
     let body;
@@ -380,7 +402,10 @@ async function handleStore(req, res, pathname) {
     const id = new URL(req.url, 'http://x').searchParams.get('id');
     await loadStore();
     if (id) mergeStore([], [id]);
-    else storeCache.sessions = [];
+    else {
+      const ids = storeCache.sessions.map((s) => s.id);
+      mergeStore([], ids);
+    }
     await persistStore();
     return sendJson(res, 200, { ok: true, count: storeCache.sessions.length });
   }
