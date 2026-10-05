@@ -4,7 +4,8 @@
 
 import { EMOTION_PALETTE } from './presets.js';
 import { MODE_PRESETS } from './presets.js';
-import { modeOf } from './prompt.js';
+import { ratioLabel } from './presets.js';
+import { modeOf, fleshRatioOf } from './prompt.js';
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -67,12 +68,31 @@ export function flashEmotions() {
 
 /* ---------------- 正文 ---------------- */
 
+/** 极简 Markdown：只认 **加粗** 和 `代码`，其余符号原样保留 */
+function fmt(raw) {
+  return esc(raw)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>');
+}
+
+/** 清理模型常见的手抖：自己加的引号、重复的角色名、残留的 ** */
+function cleanDialogue(raw, speaker) {
+  let s = String(raw || '').trim();
+  s = s.replace(/^[“"「『]+/, '').replace(/[”"」』]+$/, '');
+  s = s.replace(/^\*\*|\*\*$/g, '').trim();
+  if (speaker) {
+    const name = String(speaker).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    s = s.replace(new RegExp(`^${name}\\s*[：:，,、]?\\s*`), '').trim();
+  }
+  return s;
+}
+
 function blockHTML(block) {
-  const text = esc(block.text);
+  const text = fmt(block.text);
   if (block.type === 'tag') return `<div class="block tag">${text}</div>`;
   if (block.type === 'dialogue') {
     const speaker = block.speaker ? `<span class="speaker">${esc(block.speaker)}</span> ` : '';
-    return `<div class="block dialogue">${speaker}“${text}”</div>`;
+    return `<div class="block dialogue">${speaker}“${fmt(cleanDialogue(block.text, block.speaker))}”</div>`;
   }
   if (block.type === 'note') return `<div class="block tag">${text}</div>`;
   return `<div class="block narration">${text}</div>`;
@@ -249,7 +269,7 @@ export function renderTopActions(setup, activeId) {
   host.innerHTML = panels.map((p) => `
     <button class="mini-btn${activeId === p.id ? ' active' : ''}" data-panel="${esc(p.id)}">${esc(p.label)}</button>
   `).join('')
-    + `<button class="mini-btn mode-btn" data-open-mode title="切换尺度模式">${mode.icon} ${esc(mode.name)}</button>`
+    + `<button class="mini-btn mode-btn" data-open-mode title="切换尺度模式与配比">${mode.icon} ${esc(mode.name)} ${esc(ratioLabel(fleshRatioOf(setup)))}</button>`
     + `<button class="mini-btn" data-open-writing title="修改本剧的尺度与写作指令">✍ 写作</button>`
     + `<button class="mini-btn" data-open-settings title="设置">⚙</button>`;
 }

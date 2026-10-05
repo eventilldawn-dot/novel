@@ -6,7 +6,7 @@ import {
   TEMPLATES, EMOTION_PRESETS, LENGTH_PRESETS, TONE_PRESETS, POV_PRESETS,
   PANEL_LIBRARY, makePanel, cloneTemplate, suggestSetupLocal,
   MODE_PRESETS, MODE_ORDER, INTENSITY_MODE_MAP
-  , ORIENTATION_PRESETS, ORIENTATION_ORDER
+  , ORIENTATION_PRESETS, ORIENTATION_ORDER, modeForRatio, ratioLabel
 } from './presets.js';
 import { store, newSession } from './store.js';
 import * as syncApi from './sync.js';
@@ -14,7 +14,7 @@ import {
   SHEET_SCHEMA, CAST_FIELDS, MAX_CAST, emptySheet, emptyCastCard,
   normalizeSheet, sheetToSetupParts, sheetIsEmpty, sheetOnlyHasIdea
 } from './sheet.js';
-import { looksGarbled, modeOf } from './prompt.js';
+import { looksGarbled, modeOf, fleshRatioOf } from './prompt.js';
 import {
   generateRound, server, designSetup, testConnection,
   localConfig, PROVIDERS, probeServer, resolveTransport, designSheet, generatePanels
@@ -1409,12 +1409,14 @@ function regenerate() {
 
 /** 修改当前剧情的尺度与写作指令（不必重开一局） */
 /** 一键切换「这一步想怎么写」：剧情为主 / 平衡 / 直球 */
-function applyMode(session, key) {
+function applyMode(session, key, ratio, { save = true } = {}) {
   const m = MODE_PRESETS[key];
   if (!m || !session) return;
   session.setup.mode = key;
   session.setup.intensity = m.intensity;
-  persist(session);
+  if (Number.isFinite(ratio)) session.setup.fleshRatio = Math.max(0, Math.min(100, ratio));
+  else if (!Number.isFinite(Number(session.setup.fleshRatio))) session.setup.fleshRatio = m.fleshRatio;
+  if (save) persist(session);
   ui.renderTopActions(session.setup, state.activePanel);
 }
 
@@ -1422,6 +1424,7 @@ function openMode() {
   const s = state.session;
   if (!s) return;
   const cur = modeOf(s.setup);
+  const curRatio = fleshRatioOf(s.setup);
   ui.openModal(`
     <h3>这一步想怎么写？</h3>
     ${MODE_ORDER.map((k) => {
@@ -1431,16 +1434,33 @@ function openMode() {
         <span>${esc(m.desc)}</span>
       </button>`;
     }).join('')}
+    <div class="field" style="margin-top:14px">
+      <label class="field-label">配比微调<span class="field-hint">左＝剧情，右＝肉，随时可拖</span></label>
+      <input type="range" id="m-ratio" class="ratio-slider" min="0" max="100" step="5" value="${curRatio}" />
+      <div class="ratio-legend"><span>纯剧情</span><b id="m-ratio-text"></b><span>纯肉</span></div>
+    </div>
     <div class="tip">只影响这一部剧情，下一轮生效。想改所有新剧情的默认值，去 <b>⚙ 设置 → 默认尺度模式</b>。</div>
     <div class="row"><button class="cancel" data-close-modal>关闭</button></div>
   `, (modal) => {
+    const slider = modal.querySelector('#m-ratio');
+    const text = modal.querySelector('#m-ratio-text');
+    let key = cur;
+    const paint = () => {
+      const r = Number(slider.value);
+      key = modeForRatio(r);
+      text.textContent = `剧情 ${100 - r}% : 情欲 ${r}%（${ratioLabel(r)}）`;
+      modal.querySelectorAll('.mode-card').forEach((c) => c.classList.toggle('active', c.dataset.mode === key));
+      applyMode(s, key, r, { save: false });
+    };
+    slider.addEventListener('input', paint);
+    // 松手时才落盘，拖动过程只更新界面（手机上 400KB 的数据写太勤会卡）
+    slider.addEventListener('change', () => applyMode(s, modeForRatio(Number(slider.value)), Number(slider.value)));
+    text.textContent = `剧情 ${100 - curRatio}% : 情欲 ${curRatio}%（${ratioLabel(curRatio)}）`;
     modal.addEventListener('click', (e) => {
       const card = e.target.closest('[data-mode]');
       if (!card) return;
-      applyMode(s, card.dataset.mode);
-      ui.renderTopActions(s.setup, state.activePanel);
-      ui.closeModal();
-      ui.toast(`已切到「${MODE_PRESETS[card.dataset.mode].name}」，下一轮生效。`);
+      slider.value = MODE_PRESETS[card.dataset.mode].fleshRatio;
+      paint();
     });
   });
 }

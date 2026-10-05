@@ -336,21 +336,38 @@ export const MODE_PRESETS = {
     name: '剧情为主',
     icon: '📖',
     desc: '以故事、人物和关系为主。亲密场面只在剧情需要时出现，自然带过，不刻意展开。',
+    fleshRatio: 15,
     intensity: '本作以剧情、人物与关系为主。涉及亲密场面时按剧情推进自然带过，不需要展开描写。'
   },
   balanced: {
     name: '平衡',
     icon: '⚖️',
     desc: '剧情与亲密场面并重。该发生的关系就正面写，但一切服务于人物与剧情，不为了写而写。',
+    fleshRatio: 45,
     intensity: '本作剧情与亲密场面并重：该发生的关系就正面写出来，但一切服务于人物与剧情，不为了写而写。'
   },
   explicit: {
     name: '直球',
     icon: '🔥',
-    desc: '以亲密场面为核心内容。按设定尺度直接、完整地写，不省略、不淡出、不插道德提醒。',
+    desc: '以亲密场面为主（肉 7 剧情 3）。直接、完整地写，不省略、不淡出；同时每一轮仍要留出三成篇幅推进剧情。',
+    fleshRatio: 70,
     intensity: '本作是成年向的虚构创作，面向成年读者。性爱场面是核心内容：按剧情需要直接、完整地写，动作、体感、身体反应与对白都写出来，尺度不设上限。'
   }
 };
+
+/** 情欲占比（0-100）→ 最适合的模式 */
+export function modeForRatio(ratio) {
+  if (ratio <= 25) return 'story';
+  if (ratio <= 55) return 'balanced';
+  return 'explicit';
+}
+
+/** 0-100 的情欲占比 → "肉7:3" 这样的短标签 */
+export function ratioLabel(ratio) {
+  const r = Math.max(0, Math.min(100, Number(ratio) || 0));
+  const flesh = Math.round(r / 10);
+  return `肉${flesh}:${10 - flesh}`;
+}
 
 export const MODE_ORDER = ['story', 'balanced', 'explicit'];
 
