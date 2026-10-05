@@ -17,6 +17,7 @@ const PUBLIC_DIR = path.join(ROOT, 'public');
 const CONFIG_PATH = path.join(ROOT, 'config.json');
 const DATA_DIR = path.join(ROOT, 'data');
 const STORE_FILE = path.join(DATA_DIR, 'sessions.json');
+const BACKUP_DIR = path.join(DATA_DIR, 'backups');
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
 
@@ -149,6 +150,9 @@ function lanAddresses() {
 
 let storeCache = null;
 let storeWriting = null;
+let storeLoadFailed = false;
+let lastCount = -1;
+let lastBackupAt = 0;
 
 async function loadStore() {
   if (storeCache) return storeCache;
@@ -156,16 +160,55 @@ async function loadStore() {
     const raw = await fsp.readFile(STORE_FILE, 'utf8');
     const parsed = JSON.parse(raw);
     storeCache = { updatedAt: parsed.updatedAt || 0, sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [] };
-  } catch {
-    storeCache = { updatedAt: 0, sessions: [] };
+    storeLoadFailed = false;
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      // 首次运行：文件还不存在，这是正常的
+      storeCache = { updatedAt: 0, sessions: [] };
+      storeLoadFailed = false;
+    } else {
+      // 读到了但解析失败（例如正被写入）——**绝不能当作空数据**，
+      // 否则下一次写入就会把用户所有剧情覆盖掉
+      console.error('[novel] 数据文件读取失败，已进入保护模式（不会写回）:', err.message);
+      storeCache = { updatedAt: 0, sessions: [] };
+      storeLoadFailed = true;
+    }
   }
+  lastCount = storeCache.sessions.length;
   return storeCache;
+}
+
+/** 滚动备份：平时每 3 分钟一份，数量变少时立刻留一份（这类事故的唯一救命绳） */
+async function writeBackup(payload, tag) {
+  try {
+    await fsp.mkdir(BACKUP_DIR, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    await fsp.writeFile(path.join(BACKUP_DIR, `sessions-${stamp}${tag}.json`), payload, 'utf8');
+    lastBackupAt = Date.now();
+    const files = (await fsp.readdir(BACKUP_DIR)).filter((f) => f.endsWith('.json')).sort();
+    for (const f of files.slice(0, Math.max(0, files.length - 20))) {
+      await fsp.unlink(path.join(BACKUP_DIR, f)).catch(() => {});
+    }
+  } catch { /* 备份失败不影响主流程 */ }
 }
 
 async function persistStore() {
   if (!storeCache) return;
+  if (storeLoadFailed) {
+    console.error('[novel] 之前读取数据文件失败，本次拒绝写回，避免覆盖已有剧情。请重启服务。');
+    return;
+  }
   storeCache.updatedAt = Date.now();
   const payload = JSON.stringify(storeCache);
+  const count = storeCache.sessions.length;
+  const shrank = lastCount >= 0 && count < lastCount;
+  if (shrank || Date.now() - lastBackupAt > 180000) {
+    await writeBackup(payload, shrank ? '-shrink' : '');
+  }
+  if (shrank) {
+    console.warn(`[novel] 注意：剧情数量从 ${lastCount} 变成 ${count}，已在 data/backups/ 留档`);
+  }
+  lastCount = count;
   if (storeWriting) return storeWriting;
   storeWriting = (async () => {
     await fsp.mkdir(DATA_DIR, { recursive: true });
