@@ -820,6 +820,43 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 404, { ok: false, message: '未知接口' });
   }
 
+  /**
+   * /go — 手机 / 平板一键配置入口。
+   * 打开它会直接跳到线上版，并顺手把 Key、模型、文风样例、GitHub 同步都带过去。
+   */
+  if (pathname === '/go' || pathname === '/go/') {
+    if (isExternalHost(req) && !tokenMatches(req, parsed)) {
+      return sendJson(res, 403, {
+        ok: false,
+        error: 'need_token',
+        message: '需要同步口令。请用带 ?token= 的完整地址打开。'
+      });
+    }
+    const payload = {
+      baseUrl: config.baseUrl,
+      model: config.model,
+      temperature: config.temperature,
+      maxTokens: config.maxTokens,
+      reasoningEffort: config.reasoningEffort,
+      defaultMode: config.defaultMode,
+      defaultOrientation: config.defaultOrientation,
+      apiKey: config.apiKey || '',
+      token: config.syncToken || '',
+      gh: {
+        owner: config.ghSync?.owner || '',
+        repo: config.ghSync?.repo || '',
+        path: config.ghSync?.path || 'novel.json',
+        token: config.ghSync?.token || ''
+      }
+    };
+    const b64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+    res.writeHead(302, {
+      Location: `https://eventilldawn-dot.github.io/novel/#setup=${b64}`,
+      'Cache-Control': 'no-store'
+    });
+    return res.end();
+  }
+
   return serveStatic(req, res, pathname);
 });
 
@@ -844,6 +881,7 @@ server.listen(PORT, HOST, () => {
   lines.push(`  \x1b[2m模型状态\x1b[0m   ${config.apiKey ? `已配置 ${config.model}` : '未配置 Key → 使用本地示例引擎'}`);
   lines.push(`  \x1b[2m剧情存储\x1b[0m   ${path.relative(ROOT, STORE_FILE)}  \x1b[2m(各端共用一份)\x1b[0m`);
   lines.push(`  \x1b[2m同步口令\x1b[0m   ${config.syncToken}`);
+  lines.push(`  \x1b[2m手机配置\x1b[0m   手机上打开 http://${(lanAddresses()[0] || {}).address || 'localhost'}:${PORT}/go 一键配好线上版`);
   lines.push(`  \x1b[2m提示\x1b[0m      同一 WiFi 下，手机/平板直接访问上面的局域网地址即可，剧情自动同步`);
   lines.push('');
   console.log(lines.join('\n'));

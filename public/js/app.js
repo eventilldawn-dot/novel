@@ -1982,6 +1982,8 @@ async function openSettings() {
       const s = syncApi.syncState();
       const text = s.error
         ? `✕ ${s.error}${s.errorDetail ? `（${s.errorDetail}）` : ''}`
+        : s.kind === 'github'
+          ? `✓ 已连上你自己的 GitHub 私有仓库（${s.base.replace(/^github:/, '')}）。剧情存在仓库里，电脑关不关机都能同步。`
         : s.kind === 'server'
           ? `✓ 已连上本机服务。所有剧情保存在 ${location.origin} 这台电脑的 data/sessions.json 里，用同一个地址打开的每台设备共用这一份。`
           : s.kind === 'remote'
