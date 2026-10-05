@@ -1697,7 +1697,7 @@ async function openSettings() {
     <div class="field-2col">
       <div class="field">
         <label class="field-label">温度</label>
-        <input id="s-temp" type="text" value="${esc(String(local.temperature ?? cfg.temperature ?? 1.1))}" />
+        <input id="s-temp" type="text" value="${esc(String(local.temperature ?? cfg.temperature ?? 0.9))}" />
       </div>
       <div class="field">
         <label class="field-label">最大输出 tokens</label>
@@ -1766,7 +1766,7 @@ async function openSettings() {
     const readForm = () => ({
       baseUrl: modal.querySelector('#s-base').value.trim(),
       model: modal.querySelector('#s-model').value.trim(),
-      temperature: Number(modal.querySelector('#s-temp').value) || 1.1,
+      temperature: Number(modal.querySelector('#s-temp').value) || 0.9,
       maxTokens: Number(modal.querySelector('#s-max').value) || 32000,
       stream: modal.querySelector('#s-stream').classList.contains('active'),
       jsonMode: modal.querySelector('#s-json').classList.contains('active'),

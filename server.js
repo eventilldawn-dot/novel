@@ -24,7 +24,7 @@ const DEFAULTS = {
   baseUrl: process.env.NOVEL_API_BASE || 'https://api.deepseek.com/v1',
   apiKey: process.env.NOVEL_API_KEY || '',
   model: process.env.NOVEL_MODEL || 'deepseek-chat',
-  temperature: 1.1,
+  temperature: 0.9,
   maxTokens: 32000,
   stream: true,
   jsonMode: true,

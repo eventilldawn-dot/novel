@@ -207,7 +207,7 @@ export async function request({ messages, stream = true, json = true, onPartial,
   const build = (withJson, lean) => {
     const body = { model: cfg.model || 'deepseek-chat', messages, stream };
     if (!lean) {
-      body.temperature = Number(cfg.temperature ?? 1.1);
+      body.temperature = Number(cfg.temperature ?? 0.9);
       body.max_tokens = Number(cfg.maxTokens ?? 32000);
     }
     if (cfg.reasoningEffort === 'off') body.thinking = { type: 'disabled' };

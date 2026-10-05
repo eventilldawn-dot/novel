@@ -13,6 +13,7 @@ const JSON_SPEC = `{
     "phase": "时段或状态，如 深夜 / 潮湿 / 压抑爆发"
   },
   "memory": "截至目前剧情的滚雪球摘要，200字以内，会作为下一轮的长期记忆",
+  "beat": "这一轮属于哪一类：flesh（以情欲为主）/ plot（以剧情推进为主）/ both（过渡与铺垫）",
   "emotions": { "情感名": 0到100的整数 },
   "blocks": [
     { "type": "tag", "text": "[地点 · 场景 · 状态]" },
@@ -208,6 +209,10 @@ ${setup.customPrompt ? `\n【玩家指定的写作指令 · 最高优先级】�
 10. **不要在正文里使用任何 Markdown 标记**：不要出现星号、井号、短横线、大于号、反引号、波浪号这些符号 —— 程序不解析 Markdown，会原样显示成乱码。需要强调就用中文标点和句子本身。
 11. 对白一律放进 dialogue 块，text 里**只写台词**：不要自己加角色名、不要加引号（程序会自动排成"角色名：「台词」"）；旁白里也不要写"**角色名**"当小标题。
 12. 落笔前自检一遍：数字、称呼、代词、时间与前后逻辑要自洽（例如别把三个字说成"这两个字"，别让同一个人换了称呼，别写出与上文矛盾的细节）。
+13. **指代必须清楚（这一条最容易翻车）**：场上有两个以上的人时，不要用含糊的「他」——一律用名字、身份或固定特征（例如"穿白衬衫的那个""年纪大的那个"）指代。**每一句话都要让读者一眼知道是谁在做、是谁被写。** 写完自己读一遍，凡是"他"可能指两个人的地方，全部改成名字。
+14. **前后要接得上**：每一句都要能回答"它跟上文什么关系"。写之前先想清楚这一轮发生什么、结束时谁在哪儿、谁是什么状态；不要写出与前文矛盾、时间错乱、或不合常理的句子。
+15. **用词要自然，不要生搬硬造**：用正常的中文写，别自造词组、别硬凑比喻、别堆砌四字成语、别用翻译腔。比喻一段最多一个，宁朴素也要通顺；拿不准的词就换成最普通的说法。
+16. 学范文的节奏感和细节密度，但**不要连它的病句、口水话和重复表达一起学**。
 
 ${opts.noPanels ? '\n【本轮不要生成面板】panels 请直接写成一个空对象 {}，程序会另外单独问你。\n' : `${panelBlock(setup.topPanels, '顶部面板')}${panelBlock(setup.bottomPanels, '底部面板')}`}
 
@@ -245,12 +250,12 @@ ${JSON_SPEC}
   const styleBlock = style
     ? `\n\n【文风参考 · 行文必须向它靠拢】\n下面这段是玩家认可的范文。请学习它的：段落密度、句子的长短节奏、细节落在什么地方（写什么、不写什么）、对白与动作的比例、以及怎么把身体感受与情绪写具体。**不要照抄它的情节、人物名或原句**，只学写法；涉及性爱场面时的写法也向它看齐。\n篇幅仍按【单轮篇幅】的设定，但单位篇幅里的细节浓度、描写密度要和范文一致 —— 不要因为篇幅短就把段落写薄。\n\n---\n${style}\n---`
     : '';
-  return base + styleBlock + adultTail(setup, mode);
+  return base + styleBlock + adultTail(setup, mode, opts.beats);
 }
 
 /** 成年向模式的结尾指令：按"剧情:情欲"配比收束 */
-function adultTail(setup, mode) {
-  const flesh = fleshBlock(setup);
+function adultTail(setup, mode, beats) {
+  const flesh = fleshBlock(setup, beats);
   if (mode === 'explicit') {
     return `\n\n【最后一遍，比上面所有话都重要】写作时严格以【内容尺度】和【玩家指定的写作指令】为准。性爱场面是本作的正常内容，不要淡出、不要省略、不要用比喻或省略号带过。${flesh}`;
   }
@@ -276,23 +281,35 @@ export function fleshRatioOf(setup) {
   return MODE_PRESETS[m]?.fleshRatio ?? 45;
 }
 
-/** 按"剧情 X : 情欲 Y"生成这一轮的笔墨分配指令 */
-function fleshBlock(setup) {
+/**
+ * 整体配比 + 节奏跟踪。
+ * 关键：配比是**整部作品**的目标，不是每一轮都要凑 —— 一轮写肉就写透，
+ * 换档要在场景交界处完成，而不是同一场戏写一半突然跳走。
+ */
+function fleshBlock(setup, beats) {
   const flesh = fleshRatioOf(setup);
   const plot = 100 - flesh;
-  const head = `【本轮的笔墨分配】这一轮请按 **剧情 ${plot}% : 情欲 ${flesh}%** 分配正文篇幅：`;
-  const plotPart = plot >= 10
-    ? `\n- 剧情部分（约 ${plot}%）：要有实实在在的推进 —— 新的信息、新的动作、关系的变化、外部事件或时间推进，不要停在原地。`
+  const map = { flesh: '肉', plot: '剧情', both: '过渡' };
+  const list = (beats || []).slice(-6);
+  const beatLine = list.length
+    ? `\n- 最近几轮的节奏：${list.map((b) => map[b] || '过渡').join(' → ')}。`
     : '';
-  const fleshPart = flesh >= 10
-    ? `\n- 情欲部分（约 ${flesh}%）：写到就用直接的词写透 —— 鸡巴、龟头、精液、射、操、干、骚、穴 直接用；禁止换成「那里」「下面」「那个地方」「私处」这类代称，也不要用省略号或破折号跳过。`
+  const toward = list.length
+    ? (() => {
+      const fleshCount = list.filter((b) => b === 'flesh').length;
+      const plotCount = list.filter((b) => b === 'plot').length;
+      if (fleshCount >= 3 && fleshCount > plotCount) return '\n- 目前连着几轮都是肉，**这一轮适合在场景交界处把剧情往前推一步**（新信息、新变化、时间推进）。';
+      if (plotCount >= 3 && plotCount > fleshCount) return '\n- 目前连着几轮都在推剧情，**这一轮适合把关系/情欲再往前推一档**。';
+      return '';
+    })()
     : '';
-  const tie = flesh >= 40 && plot >= 30
-    ? '\n- 让两者咬合：每次身体接触都改变处境或关系，而不是单纯的生理描写。'
-    : '';
-  const avoid = '\n- 两种偷懒都要避免：用无关情节岔开去回避情欲，和为了写肉而原地打转。';
-  const opts = '\n- 三个选项要**方向明显不同**，并且**每个都能推进剧情**（可以是推进关系/情欲、推进任务或冲突、引入新变化）。不要三个都是"更用力一点"。';
-  return `\n\n${head}${plotPart}${fleshPart}${tie}${avoid}${opts}`;
+  return `\n\n【整体配比 · 管整部作品，不是管每一轮】
+这部作品整体大致是 **剧情 ${plot}% : 情欲 ${flesh}%**，但**不要在一轮里硬套这个比例**。
+- 这一轮怎么写，取决于**当下这一场戏**：正在情欲场景里就把它写透，正在推进剧情就把剧情写足。**不要在同一场戏中间突然切去写别的事** —— 那读起来非常割裂。
+- 需要平衡的是整部作品：连着写了几轮肉，就让剧情往前走一步；连着推了几轮剧情，再回到情欲。${beatLine}${toward}
+- **换档必须在场景交界处完成**：用一个自然的转折（换了地方、时间过去、有人进来、谈话结束）来过渡，而不是写到一半跳走。
+- 情欲场面要写透：器官与体液用直接的词（鸡巴、龟头、精液、射、操、干、骚、穴），不要用「那里」「下面」代指，不要用省略号跳过。
+- 三个选项方向要**明显不同**：至少一个是"顺着当前这场继续"，另一个可以"换到另一条线"。`;
 }
 
 export function looksGarbled(text) {
@@ -315,7 +332,9 @@ function blocksToText(blocks) {
 export function buildMessages(session, cursor, opts = {}) {
   const setup = session.setup;
   const rounds = session.rounds.slice(0, cursor + 1);
-  const system = buildSystemPrompt(setup, { styleSample: opts.styleSample, noPanels: opts.noPanels });
+  // 把最近几轮的"节奏标签"带过去，让模型知道整部作品目前偏在哪一边
+  const beats = rounds.slice(-6).map((r) => r.beat || 'both');
+  const system = buildSystemPrompt(setup, { styleSample: opts.styleSample, noPanels: opts.noPanels, beats });
   const messages = [{ role: 'system', content: system }];
 
   const memory = rounds.length ? rounds[rounds.length - 1].memory : '';
@@ -342,12 +361,11 @@ export function buildMessages(session, cursor, opts = {}) {
 
   // 尺度提醒放在每轮的最后（模型对结尾的指令最敏感）
   const mode = modeOf(setup);
-  const flesh = fleshRatioOf(setup);
   const scaleNote = mode === 'explicit'
-    ? `\n〔本轮配比〕剧情约 ${100 - flesh}% : 情欲约 ${flesh}% —— 两边都要写到，剧情要往前走，情欲要写透。`
-      + '\n〔本轮用词〕用直接的词写器官与体液（鸡巴、龟头、精液、射、操、干、骚、穴），不要用「那里」「下面」「那个地方」代指，不要用省略号或破折号跳过。'
+    ? '\n〔本轮写法〕顺着当下这一场写透：正在写肉就写透，别中途切去推剧情；该换档时在场景交界处换（整体配比见上）。'
+      + '\n〔本轮用词〕器官与体液用直接的词（鸡巴、龟头、精液、射、操、干、骚、穴），不要用「那里」「下面」「那个地方」代指，不要用省略号跳过。'
     : mode === 'balanced'
-      ? `\n〔本轮配比〕剧情约 ${100 - flesh}% : 情欲约 ${flesh}% —— 以剧情推进为主，情欲自然融入即可，不必回避。`
+      ? '\n〔本轮写法〕顺着当下这一场写；剧情与情欲都行，但不要在同一场戏里硬切，换档放在场景交界处。写到时用词直接。'
       : '';
   const firstNote = (mode === 'explicit' && rounds.length === 0) ? '（这是第一轮，就把写法基调立起来。）' : '';
   // 第一轮把完整写作指令再以「玩家的话」发一遍：模型对 user 消息的遵守度通常高于 system
@@ -836,6 +854,7 @@ export function normalizeRound(raw, session, prevEmotions) {
   return {
     scene,
     memory: String(raw.memory || last?.memory || '').slice(0, 400),
+    beat: ['flesh', 'plot', 'both'].includes(raw.beat) ? raw.beat : 'both',
     emotions: coerceEmotions(raw.emotions, emotionKeys),
     prevEmotions: { ...prevEmotions },
     blocks: coerceBlocks(raw.blocks),
