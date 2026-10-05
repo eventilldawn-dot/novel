@@ -324,6 +324,10 @@ function withCors(req, res) {
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Novel-Token');
     res.setHeader('Access-Control-Max-Age', '86400');
+    // 线上版（https 的公网页面）想读本机服务时，浏览器会先问一次这个
+    if (req.headers['access-control-request-private-network'] === 'true') {
+      res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    }
   }
 }
 
@@ -360,10 +364,21 @@ function tokenMatches(req, url) {
   return Boolean(config.syncToken) && token === config.syncToken;
 }
 
+/** 我们自己的线上版地址：它跑在这台电脑上时，允许直接读本机服务 */
+const APP_ORIGINS = new Set(['https://eventilldawn-dot.github.io']);
+
+function isLoopbackHost(req) {
+  const host = String(req.headers.host || '').split(':')[0].toLowerCase().replace(/^\[|\]$/g, '');
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
 /** 公网访问、或从别的站点跨域连过来：必须带口令 */
 function authBlocked(req, url) {
   if (!isExternalHost(req) && !isCrossOrigin(req)) return null;
   if (tokenMatches(req, url)) return null;
+  // 自己家的线上版、并且是从本机（localhost）访问的 —— 只有在这台电脑上才可能，
+  // 让电脑端打开线上版时能自动拿到配置，不用再填口令。
+  if (isLoopbackHost(req) && APP_ORIGINS.has(String(req.headers.origin || '').toLowerCase())) return null;
   return {
     ok: false,
     error: 'need_token',

@@ -17,7 +17,8 @@ import {
 import { looksGarbled, modeOf, fleshRatioOf } from './prompt.js';
 import {
   generateRound, server, designSetup, testConnection,
-  localConfig, PROVIDERS, probeServer, resolveTransport, designSheet, generatePanels
+  localConfig, PROVIDERS, probeServer, resolveTransport, designSheet, generatePanels,
+  discoverLocalServer, exportFromServer
 } from './api.js';
 import * as ui from './ui.js';
 
@@ -87,6 +88,10 @@ async function boot() {
   if (state.serverCfg.defaultOrientation) localConfig.write({ defaultOrientation: state.serverCfg.defaultOrientation });
   // 服务端如果配好了 GitHub 私有仓库同步，就自动替用户填上（用户没手动改过同步方式时）
   if (applyServerGhSync()) updateSyncUI();
+  // 在线上版页面上打开、但这台电脑上正好跑着 server.js：直接把配置接过来
+  if (!state.health?.ok) {
+    if (await adoptLocalServer()) updateSyncUI();
+  }
 
   await bootSync();
   renderSessionList();
@@ -136,6 +141,57 @@ function applyBootstrapLink() {
   if (Object.keys(syncPatch).length) syncApi.syncConfig.write(syncPatch);
 
   try { history.replaceState(null, '', location.pathname + location.search); } catch { /* 忽略 */ }
+  return true;
+}
+
+/**
+ * 在线上版页面上打开、但这台电脑上正好跑着 server.js 时，
+ * 自动把本机服务的配置（Key、模型、文风样例、GitHub 同步）接过来。
+ * 手机上通常找不到（只有本机会命中），找不到就静默跳过。
+ */
+async function adoptLocalServer() {
+  const local = localConfig.read();
+  const sc = syncApi.syncConfig.read();
+  if (sc.manual) return false;                  // 用户自己选过同步方式，不插手
+  if (local.apiKey && sc.gh?.token) return false; // 已经配好了，别重复来一遍
+
+  const found = await discoverLocalServer();
+  if (!found) return false;
+  const ex = await exportFromServer(found.base);
+  if (!ex) return false;
+
+  const patch = {};
+  const fill = (key, value, current) => {
+    if (current === undefined || current === '' || current === null) {
+      if (value !== undefined && value !== '' && value !== null) patch[key] = value;
+    }
+  };
+  fill('apiKey', ex.apiKey, local.apiKey);
+  fill('baseUrl', ex.baseUrl, local.baseUrl);
+  fill('model', ex.model, local.model);
+  fill('styleSample', ex.styleSample, local.styleSample);
+  fill('maxTokens', ex.maxTokens, local.maxTokens);
+  fill('temperature', ex.temperature, local.temperature);
+  fill('reasoningEffort', ex.reasoningEffort, local.reasoningEffort);
+  fill('defaultMode', ex.defaultMode, local.defaultMode);
+  fill('defaultOrientation', ex.defaultOrientation, local.defaultOrientation);
+  if (Object.keys(patch).length) localConfig.write(patch);
+
+  const syncPatch = {};
+  if (ex.ghSync?.owner && ex.ghSync?.repo && ex.ghSync?.token) {
+    syncPatch.backend = 'github';
+    syncPatch.gh = {
+      owner: ex.ghSync.owner,
+      repo: ex.ghSync.repo,
+      path: ex.ghSync.path || 'novel.json',
+      token: ex.ghSync.token
+    };
+  }
+  if (ex.syncToken) syncPatch.token = ex.syncToken;
+  if (Object.keys(syncPatch).length) syncApi.syncConfig.write(syncPatch);
+
+  state.serverCfg = { ...state.serverCfg, ...ex };
+  ui.toast('已连上这台电脑上的 Novel 服务，Key 和同步都配好了。');
   return true;
 }
 

@@ -95,6 +95,36 @@ export async function probeServer(force) {
   return serverAlive;
 }
 
+/**
+ * 在「线上版」页面上找本机服务：浏览器直接开线上版时，
+ * 如果这台电脑上正好跑着 server.js，就能把配置（Key、GitHub 同步）拿过来。
+ * 只能试 localhost —— 浏览器不允许 https 页面去连局域网 IP。
+ */
+export async function discoverLocalServer() {
+  const bases = ['http://localhost:8787', 'http://127.0.0.1:8787'];
+  for (const base of bases) {
+    try {
+      const res = await fetch(`${base}/api/health`, { cache: 'no-store' });
+      if (!res.ok) continue;
+      const health = await res.json();
+      if (health?.ok) return { base, health };
+    } catch { /* 这台设备上没有本机服务，正常 */ }
+  }
+  return null;
+}
+
+/** 从本机服务导出完整配置（含 Key、GitHub 同步） */
+export async function exportFromServer(base) {
+  try {
+    const res = await fetch(`${base.replace(/\/+$/, '')}/api/export`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.ok ? data : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 决定这一轮用哪条通道 */
 export async function resolveTransport() {
   const local = localConfig.read();
