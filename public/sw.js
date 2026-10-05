@@ -54,17 +54,18 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;      // 跨域（模型接口 / 隧道）不插手
   if (url.pathname.includes('/api/')) return;           // 接口永远走网络
 
-  // 打开页面：先试网络，失败就用缓存里的壳
+  // 打开页面：先试网络，失败就用缓存里的壳（no-cache = 每次都跟服务器核对有没有更新）
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req).catch(() => caches.match('./index.html').then((hit) => hit || caches.match('./')))
+      fetch(req, { cache: 'no-cache' })
+        .catch(() => caches.match('./index.html').then((hit) => hit || caches.match('./')))
     );
     return;
   }
 
   // 静态资源：网络优先（保证更新立刻生效），断网时回退到缓存
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' })
       .then((res) => {
         if (res && res.ok) caches.open(CACHE).then((c) => c.put(req, res.clone()));
         return res;
