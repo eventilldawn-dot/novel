@@ -372,13 +372,25 @@ function isLoopbackHost(req) {
   return host === 'localhost' || host === '127.0.0.1' || host === '::1';
 }
 
+/** 页面本身也是从这台电脑打开的吗（本机 / 我们自己的线上版） */
+function isLocalAppOrigin(req) {
+  const origin = String(req.headers.origin || '').toLowerCase();
+  if (APP_ORIGINS.has(origin)) return true;
+  try {
+    const host = new URL(origin).hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  } catch {
+    return false;
+  }
+}
+
 /** 公网访问、或从别的站点跨域连过来：必须带口令 */
 function authBlocked(req, url) {
   if (!isExternalHost(req) && !isCrossOrigin(req)) return null;
   if (tokenMatches(req, url)) return null;
-  // 自己家的线上版、并且是从本机（localhost）访问的 —— 只有在这台电脑上才可能，
-  // 让电脑端打开线上版时能自动拿到配置，不用再填口令。
-  if (isLoopbackHost(req) && APP_ORIGINS.has(String(req.headers.origin || '').toLowerCase())) return null;
+  // 页面跑在这台电脑上（localhost / 我们自己的线上版），而且请求也是打到本机服务 ——
+  // 让电脑端打开网页时自动拿到配置，不用再填口令。公网进来的请求照样要口令。
+  if (isLoopbackHost(req) && isLocalAppOrigin(req)) return null;
   return {
     ok: false,
     error: 'need_token',

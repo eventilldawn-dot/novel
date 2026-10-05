@@ -103,25 +103,33 @@ export async function probeServer(force) {
 export async function discoverLocalServer() {
   const bases = ['http://localhost:8787', 'http://127.0.0.1:8787'];
   for (const base of bases) {
+    // 浏览器可能把「公网页面连本机」的请求一直挂着，必须自己掐掉，不能让整个页面卡住
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 1500);
     try {
-      const res = await fetch(`${base}/api/health`, { cache: 'no-store' });
+      const res = await fetch(`${base}/api/health`, { cache: 'no-store', signal: ctrl.signal });
       if (!res.ok) continue;
       const health = await res.json();
       if (health?.ok) return { base, health };
     } catch { /* 这台设备上没有本机服务，正常 */ }
+    finally { clearTimeout(timer); }
   }
   return null;
 }
 
 /** 从本机服务导出完整配置（含 Key、GitHub 同步） */
 export async function exportFromServer(base) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
   try {
-    const res = await fetch(`${base.replace(/\/+$/, '')}/api/export`, { cache: 'no-store' });
+    const res = await fetch(`${base.replace(/\/+$/, '')}/api/export`, { cache: 'no-store', signal: ctrl.signal });
     if (!res.ok) return null;
     const data = await res.json();
     return data?.ok ? data : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

@@ -88,12 +88,16 @@ async function boot() {
   if (state.serverCfg.defaultOrientation) localConfig.write({ defaultOrientation: state.serverCfg.defaultOrientation });
   // 服务端如果配好了 GitHub 私有仓库同步，就自动替用户填上（用户没手动改过同步方式时）
   if (applyServerGhSync()) updateSyncUI();
-  // 在线上版页面上打开、但这台电脑上正好跑着 server.js：直接把配置接过来
-  if (!state.health?.ok) {
-    if (await adoptLocalServer()) updateSyncUI();
-  }
 
   await bootSync();
+  renderAfterBoot();
+  // 电脑上打开线上版、这台电脑又正好跑着 server.js 时，后台把配置接过来
+  // （放在渲染之后，就算连不上也不会卡住页面）
+  scheduleLocalServerAdoption();
+}
+
+/** 起一次会话/空状态渲染 —— boot 和「接手本机服务」成功后都要走一遍 */
+function renderAfterBoot() {
   renderSessionList();
 
   const activeId = store.activeId();
@@ -105,6 +109,25 @@ async function boot() {
   }
   updateEngineBadge();
   refreshEngineBanner();
+}
+
+/**
+ * 电脑上打开线上版的情况：这台电脑上如果跑着 server.js，就把它的配置接过来。
+ * 手机上不做这件事（手机连的是手机自己的 localhost，没有意义，还容易弹权限框）。
+ */
+function scheduleLocalServerAdoption() {
+  if (state.health?.ok) return;                                   // 本来就是本机服务
+  if (/Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent || '')) return;
+  const sc = syncApi.syncConfig.read();
+  if (sc.manual) return;                                          // 用户自己选过，不插手
+  if (localConfig.read().apiKey && sc.gh?.token) return;           // 已经配好了
+  setTimeout(() => {
+    adoptLocalServer().then((ok) => {
+      if (!ok) return;
+      updateSyncUI();
+      bootSync().then(renderAfterBoot);
+    }).catch(() => { /* 接不上就算了，保持现状 */ });
+  }, 600);
 }
 
 /** 解析 #setup=<base64url(JSON)>，写进本机配置后把地址栏里的这段抹掉 */
