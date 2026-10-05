@@ -83,7 +83,17 @@ export const store = {
     return { added, total: list.length };
   },
   replaceAll(sessions) {
-    write(KEY_SESSIONS, Array.isArray(sessions) ? sessions : []);
+    const list = Array.isArray(sessions) ? sessions : [];
+    if (write(KEY_SESSIONS, list)) return true;
+    // 存不下就先丢掉分支存档再试（分支只是历史备份，不影响正片）
+    const slim = list.map((s) => ({ ...s, branches: [] }));
+    if (write(KEY_SESSIONS, slim)) return true;
+    // 再不行：只保留最近 3 轮的面板内容
+    const slimmer = slim.map((s) => ({
+      ...s,
+      rounds: (s.rounds || []).map((r, i, arr) => (arr.length - i <= 3 ? r : { ...r, panels: {} }))
+    }));
+    return write(KEY_SESSIONS, slimmer);
   }
 };
 

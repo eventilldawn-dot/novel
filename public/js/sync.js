@@ -149,6 +149,25 @@ export function clearError() {
  *       但**轮次做并集** —— 同序号取 createdAt 较新的，谁都不丢。
  * 这样即使时间戳判断出错，也不会再出现"某一端写的内容被覆盖"。
  */
+/** 分支存档的指纹：同一个分支在不同设备上必须算出同一个 key，否则会越并越多 */
+function branchKey(b) {
+  const rounds = b?.rounds || [];
+  return `${b?.at ?? -1}|${b?.atTime ?? 0}|${rounds.length}|${rounds[0]?.createdAt || 0}`;
+}
+
+/** 分支去重 + 只留最新 12 条（以前这里是直接相加，导致每次同步翻一倍） */
+export function mergeBranches(a, b, limit = 12) {
+  const map = new Map();
+  for (const x of [...(a || []), ...(b || [])]) {
+    if (!x || !Array.isArray(x.rounds)) continue;
+    const k = branchKey(x);
+    if (!map.has(k)) map.set(k, x);
+  }
+  return Array.from(map.values())
+    .sort((x, y) => (y.atTime || 0) - (x.atTime || 0))
+    .slice(0, limit);
+}
+
 export function pickSession(a, b) {
   if (!a) return b;
   if (!b) return a;
@@ -171,8 +190,7 @@ export function pickSession(a, b) {
     out.cursor = Math.max(0, Math.min(want, rounds.length - 1));
   }
 
-  const branches = [...(newer.branches || []), ...(older.branches || [])];
-  if (branches.length) out.branches = branches;
+  out.branches = mergeBranches(newer.branches, older.branches);
   return out;
 }
 

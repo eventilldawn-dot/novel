@@ -181,6 +181,24 @@ async function persistStore() {
  * 合并同一部剧情的两份副本：整体取 updatedAt 较新的，
  * 但轮次做并集（同序号取 createdAt 较新的），保证任何一端写的内容都不会被覆盖。
  */
+/** 分支存档指纹：跨设备要算出同一个 key，否则会越并越多（曾把数据撑到 74MB） */
+function branchKey(b) {
+  const rounds = b && Array.isArray(b.rounds) ? b.rounds : [];
+  return `${(b && b.at) ?? -1}|${(b && b.atTime) ?? 0}|${rounds.length}|${(rounds[0] && rounds[0].createdAt) || 0}`;
+}
+
+function mergeBranches(a, b, limit = 12) {
+  const map = new Map();
+  for (const x of [...(a || []), ...(b || [])]) {
+    if (!x || !Array.isArray(x.rounds)) continue;
+    const k = branchKey(x);
+    if (!map.has(k)) map.set(k, x);
+  }
+  return Array.from(map.values())
+    .sort((x, y) => (y.atTime || 0) - (x.atTime || 0))
+    .slice(0, limit);
+}
+
 function pickSession(a, b) {
   if (!a) return b;
   if (!b) return a;
@@ -201,8 +219,7 @@ function pickSession(a, b) {
     const want = Number.isFinite(newer.cursor) ? newer.cursor : rounds.length - 1;
     out.cursor = Math.max(0, Math.min(want, rounds.length - 1));
   }
-  const branches = [...(newer.branches || []), ...(older.branches || [])];
-  if (branches.length) out.branches = branches;
+  out.branches = mergeBranches(newer.branches, older.branches);
   return out;
 }
 

@@ -150,7 +150,7 @@ async function flushPush() {
     // 服务器会把合并后的完整数据回传 —— 用它更新本机，避免本机缺着别端的轮次
     if (Array.isArray(res?.sessions) && res.sessions.length) {
       const merged = syncApi.mergeSessions(store.listSessions(), res.sessions);
-      store.replaceAll(merged);
+      if (!store.replaceAll(merged)) syncApi.markError('本机浏览器存储已满，已用服务端数据覆盖');
       renderSessionList();
       if (state.session) {
         const fresh = merged.find((x) => x.id === state.session.id);
@@ -1049,6 +1049,9 @@ async function generate() {
       const tail = s.rounds.slice(s.cursor + 1);
       s.branches = s.branches || [];
       s.branches.push({ at: s.cursor, atTime: Date.now(), rounds: tail });
+      if (s.branches.length > 12) {
+        s.branches = s.branches.slice(-12);   // 只留最近 12 条，别让它无限长
+      }
       s.rounds = s.rounds.slice(0, s.cursor + 1);
     }
     s.rounds.push(round);
