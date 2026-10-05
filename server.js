@@ -187,12 +187,20 @@ function branchKey(b) {
   return `${(b && b.at) ?? -1}|${(b && b.atTime) ?? 0}|${rounds.length}|${(rounds[0] && rounds[0].createdAt) || 0}`;
 }
 
-function mergeBranches(a, b, limit = 12) {
+const BRANCH_KEEP_ROUNDS = 5;
+const BRANCH_KEEP_COUNT = 5;
+
+function trimBranch(b) {
+  if (!b || !Array.isArray(b.rounds)) return b;
+  return b.rounds.length <= BRANCH_KEEP_ROUNDS ? b : { ...b, rounds: b.rounds.slice(-BRANCH_KEEP_ROUNDS) };
+}
+
+function mergeBranches(a, b, limit = BRANCH_KEEP_COUNT) {
   const map = new Map();
   for (const x of [...(a || []), ...(b || [])]) {
     if (!x || !Array.isArray(x.rounds)) continue;
     const k = branchKey(x);
-    if (!map.has(k)) map.set(k, x);
+    if (!map.has(k)) map.set(k, trimBranch(x));
   }
   return Array.from(map.values())
     .sort((x, y) => (y.atTime || 0) - (x.atTime || 0))

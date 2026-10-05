@@ -155,13 +155,22 @@ function branchKey(b) {
   return `${b?.at ?? -1}|${b?.atTime ?? 0}|${rounds.length}|${rounds[0]?.createdAt || 0}`;
 }
 
-/** 分支去重 + 只留最新 12 条（以前这里是直接相加，导致每次同步翻一倍） */
-export function mergeBranches(a, b, limit = 12) {
+/** 支线存档上限：每条支线最多留 5 轮，总共最多留 5 条 */
+export const BRANCH_KEEP_ROUNDS = 5;
+export const BRANCH_KEEP_COUNT = 5;
+
+export function trimBranch(b) {
+  if (!b || !Array.isArray(b.rounds)) return b;
+  return b.rounds.length <= BRANCH_KEEP_ROUNDS ? b : { ...b, rounds: b.rounds.slice(-BRANCH_KEEP_ROUNDS) };
+}
+
+/** 分支去重 + 截断到 5 轮 + 只留最新 5 条 */
+export function mergeBranches(a, b, limit = BRANCH_KEEP_COUNT) {
   const map = new Map();
   for (const x of [...(a || []), ...(b || [])]) {
     if (!x || !Array.isArray(x.rounds)) continue;
     const k = branchKey(x);
-    if (!map.has(k)) map.set(k, x);
+    if (!map.has(k)) map.set(k, trimBranch(x));
   }
   return Array.from(map.values())
     .sort((x, y) => (y.atTime || 0) - (x.atTime || 0))

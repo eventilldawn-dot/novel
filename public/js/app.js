@@ -1048,9 +1048,14 @@ async function generate() {
     if (s.cursor < s.rounds.length - 1) {
       const tail = s.rounds.slice(s.cursor + 1);
       s.branches = s.branches || [];
-      s.branches.push({ at: s.cursor, atTime: Date.now(), rounds: tail });
-      if (s.branches.length > 12) {
-        s.branches = s.branches.slice(-12);   // 只留最近 12 条，别让它无限长
+      // 支线只留 5 轮（超出部分自动丢掉），总共最多留 5 条
+      s.branches.push({
+        at: s.cursor,
+        atTime: Date.now(),
+        rounds: tail.slice(-syncApi.BRANCH_KEEP_ROUNDS)
+      });
+      if (s.branches.length > syncApi.BRANCH_KEEP_COUNT) {
+        s.branches = s.branches.slice(-syncApi.BRANCH_KEEP_COUNT);
       }
       s.rounds = s.rounds.slice(0, s.cursor + 1);
     }
