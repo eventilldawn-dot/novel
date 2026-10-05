@@ -155,9 +155,14 @@ export async function pull() {
     const { data } = await ghPull(syncConfig.read().gh);
     state.lastSync = Date.now();
     state.error = '';
-    if (!data) return { sessions: [], deleted: [], updatedAt: 0 };
+    if (!data) return { sessions: [], deleted: [], updatedAt: 0, meta: {} };
     state.count = (data.sessions || []).length;
-    return { sessions: data.sessions || [], deleted: data.deleted || [], updatedAt: data.updatedAt || 0 };
+    return {
+      sessions: data.sessions || [],
+      deleted: data.deleted || [],
+      updatedAt: data.updatedAt || 0,
+      meta: data.meta || {}
+    };
   }
   const res = await fetch(`${state.base}/api/store`, { headers: headers(), cache: 'no-store' });
   if (res.status === 403) throw new Error('同步口令不正确');
@@ -188,7 +193,7 @@ export const lastVersion = {
   set(v) { try { localStorage.setItem(KEY_VERSION, String(v || '')); } catch { /* ignore */ } }
 };
 
-export async function push({ sessions = [], deleted = [] }) {
+export async function push({ sessions = [], deleted = [], meta = {} }) {
   if (!state.available) throw new Error('没有可用的同步服务');
   if (state.kind === 'github') {
     const cfg = syncConfig.read().gh;
@@ -200,10 +205,17 @@ export async function push({ sessions = [], deleted = [] }) {
       [],
       [...(remote.deleted || []), ...deleted.map((id) => ({ id, at: Date.now() }))]
     );
+    // meta 放不随剧情变的东西（文风样例等），空值不覆盖远端已有的
+    const cleanMeta = {};
+    for (const [k, v] of Object.entries(meta || {})) {
+      if (v !== undefined && v !== null && v !== '') cleanMeta[k] = v;
+    }
+    const nextMeta = { ...(remote.meta || {}), ...cleanMeta };
     const next = {
       updatedAt: Date.now(),
       sessions: merged,
-      deleted: dedupeTombstones([...(remote.deleted || []), ...deleted.map((id) => ({ id, at: Date.now() }))])
+      deleted: dedupeTombstones([...(remote.deleted || []), ...deleted.map((id) => ({ id, at: Date.now() }))]),
+      meta: nextMeta
     };
     const sha = await ghPush(cfg, next, cur.sha);
     state.lastSha = sha;
@@ -216,14 +228,15 @@ export async function push({ sessions = [], deleted = [] }) {
       updatedAt: next.updatedAt,
       count: next.sessions.length,
       sessions: next.sessions,
-      deleted: next.deleted
+      deleted: next.deleted,
+      meta: nextMeta
     };
   }
   const res = await fetch(`${state.base}/api/store`, {
     method: 'POST',
     headers: headers(),
     // echo: 让服务器把"合并后的完整结果"回传 —— 否则本机可能一直缺着别端的轮次
-    body: JSON.stringify({ sessions, deleted, echo: true })
+    body: JSON.stringify({ sessions, deleted, meta, echo: true })
   });
   if (res.status === 403) throw new Error('同步口令不正确');
   if (!res.ok) throw new Error(`服务返回 ${res.status}`);

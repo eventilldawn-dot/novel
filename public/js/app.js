@@ -265,6 +265,20 @@ function queueDelete(id) {
   schedulePush();
 }
 
+/** 跟着同步走的小配置（目前只有文风样例），让几台设备的文风保持一致 */
+function syncMeta() {
+  const styleSample = localConfig.read().styleSample;
+  return styleSample ? { styleSample } : {};
+}
+
+/** 本机还没填文风样例时，用同步下来的那份填上 */
+function applySyncMeta(meta) {
+  if (!meta || typeof meta !== 'object' || !meta.styleSample) return;
+  if (localConfig.read().styleSample) return;
+  localConfig.write({ styleSample: meta.styleSample });
+  state.serverCfg = { ...state.serverCfg, styleSample: meta.styleSample };
+}
+
 function schedulePush() {
   clearTimeout(pushQueue.timer);
   pushQueue.timer = setTimeout(flushPush, 800);
@@ -274,12 +288,14 @@ async function flushPush() {
   if (!state.sync.available) return;
   if (!pushQueue.sessions.size && !pushQueue.deleted.size) return;
   const payload = { sessions: Array.from(pushQueue.sessions.values()), deleted: Array.from(pushQueue.deleted) };
+  payload.meta = syncMeta();
   pushQueue.sessions.clear();
   pushQueue.deleted.clear();
   state.sync.busy = true;
   updateSyncUI();
   try {
     const res = await syncApi.push(payload);
+    applySyncMeta(res?.meta);
     // 服务器会把合并后的完整数据回传 —— 用它更新本机，避免本机缺着别端的轮次
     if (Array.isArray(res?.sessions) && res.sessions.length) {
       const merged = syncApi.mergeSessions(store.listSessions(), res.sessions, res.deleted || []);
@@ -335,10 +351,12 @@ async function bootSync() {
       return;
     }
     const remote = await syncApi.pull();
+    applySyncMeta(remote?.meta);
     const merged = syncApi.mergeSessions(store.listSessions(), remote.sessions || [], remote.deleted || []);
     store.replaceAll(merged);
     // 把本机独有的（比如之前在浏览器里写的）补推上去
-    await syncApi.push({ sessions: merged, deleted: [] });
+    const up = await syncApi.push({ sessions: merged, deleted: [], meta: syncMeta() });
+    applySyncMeta(up?.meta);
     syncApi.clearError();
   } catch (err) {
     syncApi.markError(err.message);
@@ -357,9 +375,11 @@ async function runFullSync() {
   updateSyncUI();
   try {
     const remote = await syncApi.pull();
+    applySyncMeta(remote?.meta);
     const merged = syncApi.mergeSessions(store.listSessions(), remote.sessions || [], remote.deleted || []);
     store.replaceAll(merged);
-    await syncApi.push({ sessions: merged, deleted: [] });
+    const up = await syncApi.push({ sessions: merged, deleted: [], meta: syncMeta() });
+    applySyncMeta(up?.meta);
     syncApi.clearError();
     renderSessionList();
     if (state.session) {
