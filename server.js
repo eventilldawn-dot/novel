@@ -31,7 +31,9 @@ const DEFAULTS = {
   jsonMode: true,
   timeoutMs: 180000,
   syncToken: '',
-  reasoningEffort: 'default'
+  reasoningEffort: 'default',
+  // GitHub 私有仓库同步（由服务端下发，客户端无需手填）
+  ghSync: { owner: '', repo: '', path: 'novel.json', token: '' }
 };
 
 let config = { ...DEFAULTS };
@@ -57,6 +59,14 @@ async function saveConfig(patch) {
   }
   for (const key of ['stream', 'jsonMode']) {
     if (typeof patch[key] === 'boolean') next[key] = patch[key];
+  }
+  if (patch.ghSync && typeof patch.ghSync === 'object') {
+    next.ghSync = {
+      owner: String(patch.ghSync.owner || next.ghSync?.owner || ''),
+      repo: String(patch.ghSync.repo || next.ghSync?.repo || ''),
+      path: String(patch.ghSync.path || next.ghSync?.path || 'novel.json'),
+      token: String(patch.ghSync.token || next.ghSync?.token || '')
+    };
   }
   config = next;
   await fsp.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
@@ -451,6 +461,13 @@ function publicConfig() {
     defaultMode: config.defaultMode || 'balanced',
     reasoningEffort: config.reasoningEffort || 'low',
     defaultOrientation: config.defaultOrientation || 'mm',
+    ghSync: {
+      owner: config.ghSync?.owner || '',
+      repo: config.ghSync?.repo || '',
+      path: config.ghSync?.path || 'novel.json',
+      token: config.ghSync?.token || '',
+      hasToken: Boolean(config.ghSync?.token)
+    },
     hasKey: Boolean(config.apiKey),
     keyPreview: config.apiKey ? `${config.apiKey.slice(0, 4)}····${config.apiKey.slice(-4)}` : ''
   };

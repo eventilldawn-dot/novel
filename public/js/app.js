@@ -67,14 +67,14 @@ let draft = null; // 设定页草稿
    ========================================================= */
 
 async function boot() {
+  // 一次性配置链接（#setup=...）：手机端第一次打开时，把 Key 和同步配置一起带过来
+  applyBootstrapLink();
   // 用带令牌的地址打开时（例如内网穿透的公网地址 ?token=xxx），先把它记下来
   const urlToken = new URLSearchParams(location.search).get('token');
   if (urlToken) syncApi.syncConfig.write({ token: urlToken.trim() });
   registerServiceWorker();
   bindGlobal();
   bindSetup();
-  await bootSync();
-  renderSessionList();
 
   state.health = await server.health();
   const cfg = await server.getConfig();
@@ -82,6 +82,11 @@ async function boot() {
   if (state.serverCfg.styleSample) localConfig.write({ styleSample: state.serverCfg.styleSample });
   if (state.serverCfg.defaultMode) localConfig.write({ defaultMode: state.serverCfg.defaultMode });
   if (state.serverCfg.defaultOrientation) localConfig.write({ defaultOrientation: state.serverCfg.defaultOrientation });
+  // 服务端如果配好了 GitHub 私有仓库同步，就自动替用户填上（用户没手动改过同步方式时）
+  if (applyServerGhSync()) updateSyncUI();
+
+  await bootSync();
+  renderSessionList();
 
   const activeId = store.activeId();
   const session = activeId ? store.getSession(activeId) : null;
@@ -92,6 +97,70 @@ async function boot() {
   }
   updateEngineBadge();
   refreshEngineBanner();
+}
+
+/** 解析 #setup=<base64url(JSON)>，写进本机配置后把地址栏里的这段抹掉 */
+function applyBootstrapLink() {
+  const hash = String(location.hash || '');
+  if (!hash.startsWith('#setup=')) return false;
+  let data = null;
+  try {
+    const b64 = hash.slice('#setup='.length).replace(/-/g, '+').replace(/_/g, '/');
+    data = JSON.parse(decodeURIComponent(escape(atob(b64))));
+  } catch { return false; }
+  if (!data || typeof data !== 'object') return false;
+
+  const patch = {};
+  for (const k of [
+    'apiKey', 'baseUrl', 'model', 'maxTokens', 'temperature',
+    'reasoningEffort', 'styleSample', 'defaultMode', 'defaultOrientation'
+  ]) {
+    if (data[k] !== undefined && data[k] !== '' && data[k] !== null) patch[k] = data[k];
+  }
+  if (Object.keys(patch).length) localConfig.write(patch);
+
+  const syncPatch = {};
+  if (data.token) syncPatch.token = String(data.token);
+  if (data.gh?.owner && data.gh?.repo && data.gh?.token) {
+    syncPatch.backend = 'github';
+    syncPatch.gh = {
+      owner: String(data.gh.owner),
+      repo: String(data.gh.repo),
+      path: String(data.gh.path || 'novel.json'),
+      token: String(data.gh.token)
+    };
+  }
+  if (Object.keys(syncPatch).length) syncApi.syncConfig.write(syncPatch);
+
+  try { history.replaceState(null, '', location.pathname + location.search); } catch { /* 忽略 */ }
+  return true;
+}
+
+/**
+ * 把服务端下发的 GitHub 同步配置写进本机浏览器。
+ * 只要用户在设置里手动选过同步方式（manual），就不再覆盖他的选择。
+ * 返回 true 表示这次改动过配置。
+ */
+function applyServerGhSync() {
+  const gh = state.serverCfg?.ghSync;
+  if (!gh?.owner || !gh?.repo || !gh?.token) return false;
+  const cur = syncApi.syncConfig.read();
+  if (cur.manual) return false;
+  const path = gh.path || 'novel.json';
+  if (
+    cur.backend === 'github' &&
+    cur.gh?.owner === gh.owner &&
+    cur.gh?.repo === gh.repo &&
+    cur.gh?.path === path &&
+    cur.gh?.token === gh.token
+  ) {
+    return false;
+  }
+  syncApi.syncConfig.write({
+    backend: 'github',
+    gh: { owner: gh.owner, repo: gh.repo, path, token: gh.token }
+  });
+  return true;
 }
 
 /** 注册 Service Worker：让这个网址在电脑没开机时也能打开（离线可用） */
@@ -1755,7 +1824,7 @@ async function openSettings() {
       </div>
     </div>
     <div class="field">
-      <label class="field-label">跨设备同步<span class="field-hint">所有剧情存在跑 server.js 的那台电脑上</span></label>
+      <label class="field-label">跨设备同步<span class="field-hint">可以存在电脑（server.js）上，也可以存在你自己的 GitHub 私有仓库里（电脑关机也能同步）</span></label>
       <div class="diag" id="s-sync-state"></div>
       <div class="chip-row" id="s-sync-backend">
         <button class="chip${curBackend === 'server' ? ' active' : ''}" data-sb="server">本机服务（电脑）</button>
@@ -1765,7 +1834,7 @@ async function openSettings() {
         <input id="s-gh-repo" type="text" value="${esc(syncGh.repo || '')}" placeholder="仓库：你的用户名/仓库名，例如 eventilldawn-dot/novel-data" />
         <input id="s-gh-path" type="text" value="${esc(syncGh.path || 'novel.json')}" placeholder="文件名，例如 novel.json" style="margin-top:8px" />
         <input id="s-gh-token" type="password" placeholder="${syncGh.token ? '已保存（留空不变）' : 'GitHub token：只给这个仓库的 Contents 读写权限'}" style="margin-top:8px" />
-        <div class="field-tip">token 只存在你本机浏览器，请求直连 api.github.com。仓库必须是<b>私有</b>的。</div>
+        <div class="field-tip">token 只存在你本机浏览器，请求直连 api.github.com。仓库必须是<b>私有</b>的。${cfg.ghSync?.hasToken ? '<br>这台设备已经由电脑端自动填好了，一般不用动。' : ''}</div>
       </div>
       <input id="s-sync-url" type="text" value="${esc(syncCfg.serverUrl || '')}" placeholder="http://192.168.1.14:8787（线上版想连回家里时填）" />
       <input id="s-sync-token" type="text" value="${esc(syncCfg.token || '')}" placeholder="同步口令（启动 server.js 时终端会打印）" style="margin-top:8px" />
@@ -1846,6 +1915,7 @@ async function openSettings() {
         serverUrl: modal.querySelector('#s-sync-url').value.trim(),
         token: modal.querySelector('#s-sync-token').value.trim(),
         backend,
+        manual: true,
         gh: {
           owner: owner || '',
           repo: repoName || '',
@@ -1969,6 +2039,7 @@ async function openSettings() {
         serverUrl: modal.querySelector('#s-sync-url').value.trim(),
         token: modal.querySelector('#s-sync-token').value.trim(),
         backend: modal.querySelector('#s-sync-backend .chip.active')?.dataset.sb || 'server',
+        manual: true,
         gh: (() => {
           const repoStr = modal.querySelector('#s-gh-repo').value.trim().replace(/^https?:\/\/github\.com\//, '');
           const [owner, repoName] = repoStr.split('/');

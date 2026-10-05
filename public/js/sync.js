@@ -210,7 +210,14 @@ export async function push({ sessions = [], deleted = [] }) {
     state.lastSync = Date.now();
     state.error = '';
     state.count = next.sessions.length;
-    return { ok: true, updatedAt: next.updatedAt, count: next.sessions.length };
+    // 回传合并后的结果，让调用方（flushPush）能拿它更新本机，和服务器模式行为一致
+    return {
+      ok: true,
+      updatedAt: next.updatedAt,
+      count: next.sessions.length,
+      sessions: next.sessions,
+      deleted: next.deleted
+    };
   }
   const res = await fetch(`${state.base}/api/store`, {
     method: 'POST',
