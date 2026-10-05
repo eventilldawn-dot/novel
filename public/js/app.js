@@ -25,6 +25,9 @@ const $ = ui.$;
 const $$ = ui.$$;
 const esc = ui.esc;
 
+/** 线上版地址：电脑关机也能打开，配合 GitHub 私有仓库同步使用 */
+const ONLINE_BASE = 'https://eventilldawn-dot.github.io/novel/';
+
 const INTENSITY = [
   { label: '全年龄', text: '全年龄向，只写情感、张力与氛围，不涉及性描写。' },
   { label: '文学化克制', text: '成人向的文学化描写，重心理与氛围，避免直白的器官词与粗俗表达。' },
@@ -134,6 +137,67 @@ function applyBootstrapLink() {
 
   try { history.replaceState(null, '', location.pathname + location.search); } catch { /* 忽略 */ }
   return true;
+}
+
+/**
+ * 把当前这台设备上的配置（Key、模型、文风样例、GitHub 同步）打包成线上版链接。
+ * 电脑上的 Key 存在服务端，所以优先向本机服务要一份完整配置。
+ */
+async function buildBootstrapLink(form = {}) {
+  const local = localConfig.read();
+  const sc = syncApi.syncConfig.read();
+  let src = {};
+  try {
+    const srv = await probeServer();
+    if (srv?.up) {
+      const ex = await server.exportConfig();
+      if (ex?.ok) src = ex;
+    }
+  } catch { /* 线上版没有本机服务，就用表单里的值 */ }
+
+  const gh = (src.ghSync?.owner && src.ghSync?.token) ? src.ghSync : (sc.gh || {});
+  const pick = (...vals) => vals.find((v) => v !== undefined && v !== null && v !== '') ?? '';
+  const payload = {
+    apiKey: pick(form.key, src.apiKey, local.apiKey),
+    baseUrl: pick(form.baseUrl, src.baseUrl, local.baseUrl),
+    model: pick(form.model, src.model, local.model),
+    temperature: Number(pick(form.temperature, src.temperature, local.temperature, 0.9)),
+    maxTokens: Number(pick(form.maxTokens, src.maxTokens, local.maxTokens, 12000)),
+    reasoningEffort: pick(form.reasoningEffort, src.reasoningEffort, local.reasoningEffort, 'default'),
+    styleSample: pick(form.styleSample, src.styleSample, local.styleSample),
+    defaultMode: pick(form.defaultMode, src.defaultMode, local.defaultMode, 'balanced'),
+    defaultOrientation: pick(form.defaultOrientation, src.defaultOrientation, local.defaultOrientation, 'mm'),
+    token: pick(src.syncToken, sc.token)
+  };
+  if (gh?.owner && gh?.repo && gh?.token) {
+    payload.gh = {
+      owner: gh.owner, repo: gh.repo, path: gh.path || 'novel.json', token: gh.token
+    };
+  }
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${ONLINE_BASE}#setup=${b64}`;
+}
+
+/** 复制到剪贴板，手机 / 老浏览器不支持时退回手选 */
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch { /* 继续用后备方案 */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -1840,7 +1904,9 @@ async function openSettings() {
       <input id="s-sync-token" type="text" value="${esc(syncCfg.token || '')}" placeholder="同步口令（启动 server.js 时终端会打印）" style="margin-top:8px" />
       <div class="chip-row" style="margin-top:9px">
         <button class="chip" id="s-sync-now">立即同步</button>
+        <button class="chip" id="s-make-link">打包成手机配置链接</button>
       </div>
+      <div class="field-tip">手机第一次用线上版时：点上面的按钮 → 把复制到的链接发到手机（微信文件传输助手）→ 手机上用浏览器打开一次，Key 和同步就都配好了，之后不用再碰电脑。</div>
     </div>
     <div class="tip">
       ${srv.up
@@ -1940,6 +2006,31 @@ async function openSettings() {
       await applySyncForm();
       await runFullSync();
       paintSync();
+    });
+
+    modal.querySelector('#s-make-link').addEventListener('click', async () => {
+      const btn = modal.querySelector('#s-make-link');
+      btn.textContent = '正在打包…';
+      const link = await buildBootstrapLink({
+        key: modal.querySelector('#s-key').value.trim(),
+        baseUrl: modal.querySelector('#s-base').value.trim(),
+        model: modal.querySelector('#s-model').value.trim(),
+        temperature: Number(modal.querySelector('#s-temp').value) || 0.9,
+        maxTokens: Number(modal.querySelector('#s-max').value) || 12000,
+        reasoningEffort: modal.querySelector('#s-reasoning .chip.active')?.dataset.r || 'default',
+        styleSample: modal.querySelector('#s-style').value.trim(),
+        defaultMode: modal.querySelector('#s-default-mode .chip.active')?.dataset.dm || 'balanced',
+        defaultOrientation: modal.querySelector('#s-default-orientation .chip.active')?.dataset.do || 'mm'
+      });
+      btn.textContent = '打包成手机配置链接';
+      const copied = await copyText(link);
+      if (copied) ui.toast('已复制。发到手机（微信文件传输助手）后用浏览器打开一次就行。');
+      else ui.toast('没能自动复制，链接已放进下面的框里，手动复制一下。', 'warn');
+      modal.querySelector('#s-result').innerHTML =
+        `<div class="diag ok"><b>手机配置链接（${link.length} 字符）</b>`
+        + `<textarea rows="4" style="width:100%;margin-top:6px">${esc(link)}</textarea>`
+        + `<div class="field-tip">用手机浏览器打开一次即可，之后手机用 ${esc(ONLINE_BASE)} 就够了，不用电脑开机。</div></div>`;
+      modal.querySelector('#s-result textarea')?.select?.();
     });
 
     modal.querySelector('#s-style-clear').addEventListener('click', () => {

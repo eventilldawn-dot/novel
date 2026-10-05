@@ -77,6 +77,8 @@ export const server = {
     headers: apiHeaders(),
     body: JSON.stringify(patch)
   }).catch(() => ({ ok: false, config: {} })),
+  // 一次性搬家：把电脑上的完整配置（含 Key）打包，用于手机 / 平板第一次打开
+  exportConfig: () => jsonFetch('/api/export').catch(() => ({ ok: false })),
   models: () => jsonFetch('/api/models').catch(() => ({ ok: false, models: [] }))
 };
 

@@ -755,6 +755,35 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, { ok: true, config: publicConfig() }, req);
   }
 
+  /**
+   * 一次性搬家：把电脑上这份完整配置（含 Key 与 GitHub 同步）打包给手机 / 平板。
+   * 只在「本机 / 局域网」或「带了正确同步口令」时才给，公网上的陌生人拿不到。
+   */
+  if (pathname === '/api/export' && req.method === 'GET') {
+    if (isExternalHost(req) && !tokenMatches(req, parsed)) {
+      return sendJson(res, 403, { ok: false, error: 'need_token', message: '需要同步口令才能导出配置。' });
+    }
+    return sendJson(res, 200, {
+      ok: true,
+      baseUrl: config.baseUrl,
+      model: config.model,
+      temperature: config.temperature,
+      maxTokens: config.maxTokens,
+      reasoningEffort: config.reasoningEffort,
+      styleSample: config.styleSample || '',
+      defaultMode: config.defaultMode,
+      defaultOrientation: config.defaultOrientation,
+      apiKey: config.apiKey || '',
+      syncToken: config.syncToken || '',
+      ghSync: {
+        owner: config.ghSync?.owner || '',
+        repo: config.ghSync?.repo || '',
+        path: config.ghSync?.path || 'novel.json',
+        token: config.ghSync?.token || ''
+      }
+    }, req);
+  }
+
   if (pathname === '/api/config' && req.method === 'POST') {
     try {
       const body = await readBody(req);
