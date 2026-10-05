@@ -415,6 +415,7 @@ export function renderSyncStatus({ kind, error, busy, count, serverUrl, storageP
   const map = {
     server: { cls: 'synced', dot: '☁', text: '已同步 · 存在本机服务' },
     remote: { cls: 'synced', dot: '☁', text: '已同步 · 远程服务' },
+    github: { cls: 'synced', dot: '☁', text: '已同步 · GitHub 私有仓库' },
     local: { cls: '', dot: '▣', text: '仅本机浏览器' }
   };
   const base = map[kind] || map.local;
@@ -428,8 +429,10 @@ export function renderSyncStatus({ kind, error, busy, count, serverUrl, storageP
     status,
     text,
     title: kind === 'local'
-      ? '剧情存在这台设备的浏览器里，换设备看不到。启动电脑上的 server.js 后改为跨设备同步。'
-      : `所有剧情保存在服务上（${serverUrl || '当前地址'}），同一服务的设备共用一份。`
+      ? '剧情存在这台设备的浏览器里，换设备看不到。可以在设置里改成「GitHub 私有仓库」同步（不用电脑开机）。'
+      : kind === 'github'
+        ? `所有剧情同步在你的私有仓库里（${serverUrl || ''}），手机和电脑共用一份。`
+        : `所有剧情保存在服务上（${serverUrl || '当前地址'}），同一服务的设备共用一份。`
   });
 
   return {
@@ -438,6 +441,8 @@ export function renderSyncStatus({ kind, error, busy, count, serverUrl, storageP
     busy,
     count,
     serverUrl,
-    storage: kind === 'local' ? storagePath : `${serverUrl || '当前站点'} → data/sessions.json`
+    storage: kind === 'local' ? storagePath
+      : kind === 'github' ? 'GitHub 私有仓库'
+        : `${serverUrl || '当前站点'} → data/sessions.json`
   };
 }

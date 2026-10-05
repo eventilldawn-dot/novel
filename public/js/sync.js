@@ -7,6 +7,53 @@
  */
 
 const KEY = 'novel.sync.v1';
+const GH_API = 'https://api.github.com';
+
+/** GitHub 私有仓库作为同步盘：不用电脑开机，数据存在你自己的私有仓库里 */
+async function ghRequest(cfg, path, options = {}) {
+  const url = `${GH_API}/repos/${cfg.owner}/${cfg.repo}/contents/${encodeURIComponent(path)}`;
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${cfg.token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {})
+    }
+  });
+  if (res.status === 404) return { notFound: true };
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    let msg = `GitHub 返回 ${res.status}`;
+    try { msg = JSON.parse(text)?.message || msg; } catch { /* keep */ }
+    if (res.status === 401) msg += '（token 无效或过期）';
+    if (res.status === 403) msg += '（token 权限不够：需要该仓库的 Contents 读写权限）';
+    throw new Error(msg);
+  }
+  return await res.json();
+}
+
+async function ghPull(cfg) {
+  const file = await ghRequest(cfg, cfg.path, { method: 'GET' });
+  if (file.notFound) return { data: null, sha: null };
+  const json = JSON.parse(decodeURIComponent(escape(atob(String(file.content || '').replace(/\n/g, '')))));
+  return { data: json, sha: file.sha };
+}
+
+async function ghPush(cfg, data, sha) {
+  const text = JSON.stringify(data);
+  if (text.length > 900 * 1024) {
+    throw new Error('数据超过 900KB，GitHub 单文件接口放不下（需要精简剧情或换方案）');
+  }
+  const body = {
+    message: `novel sync ${new Date().toISOString()}`,
+    content: btoa(unescape(encodeURIComponent(text))),
+    ...(sha ? { sha } : {})
+  };
+  const res = await ghRequest(cfg, cfg.path, { method: 'PUT', body: JSON.stringify(body) });
+  return res?.content?.sha || null;
+}
 
 export const syncConfig = {
   read() {
@@ -61,6 +108,23 @@ async function probe(base) {
 
 /** 启动时判断走哪条路：同源服务 → 配置的远端服务 → 纯本地 */
 export async function initSync() {
+  const cfg = syncConfig.read();
+  // 选了 GitHub 私有仓库：直接走它，不需要电脑开着
+  if (cfg.backend === 'github' && cfg.gh?.owner && cfg.gh?.repo && cfg.gh?.path && cfg.gh?.token) {
+    try {
+      await ghPull(cfg.gh);
+      state.available = true;
+      state.kind = 'github';
+      state.base = `github:${cfg.gh.owner}/${cfg.gh.repo}`;
+      state.error = '';
+      return true;
+    } catch (err) {
+      state.error = `GitHub 同步不可用：${err.message}`;
+      state.available = false;
+      state.kind = 'local';
+      return false;
+    }
+  }
   const same = await probe('');
   if (same?.sync) {
     state.available = true;
@@ -68,7 +132,6 @@ export async function initSync() {
     state.base = '';
     return true;
   }
-  const cfg = syncConfig.read();
   if (cfg.serverUrl) {
     const base = String(cfg.serverUrl).replace(/\/+$/, '');
     const remote = await probe(base);
@@ -88,6 +151,14 @@ export async function initSync() {
 
 export async function pull() {
   if (!state.available) throw new Error('没有可用的同步服务');
+  if (state.kind === 'github') {
+    const { data } = await ghPull(syncConfig.read().gh);
+    state.lastSync = Date.now();
+    state.error = '';
+    if (!data) return { sessions: [], deleted: [], updatedAt: 0 };
+    state.count = (data.sessions || []).length;
+    return { sessions: data.sessions || [], deleted: data.deleted || [], updatedAt: data.updatedAt || 0 };
+  }
   const res = await fetch(`${state.base}/api/store`, { headers: headers(), cache: 'no-store' });
   if (res.status === 403) throw new Error('同步口令不正确');
   if (!res.ok) throw new Error(`服务返回 ${res.status}`);
@@ -119,6 +190,28 @@ export const lastVersion = {
 
 export async function push({ sessions = [], deleted = [] }) {
   if (!state.available) throw new Error('没有可用的同步服务');
+  if (state.kind === 'github') {
+    const cfg = syncConfig.read().gh;
+    // GitHub 没有服务端帮我合并：先读回来，在本地合并（并集 + 删除墓碑），再写回去
+    const cur = await ghPull(cfg);
+    const remote = cur.data || { sessions: [], deleted: [], updatedAt: 0 };
+    const merged = mergeSessions(
+      [...(remote.sessions || []), ...sessions],
+      [],
+      [...(remote.deleted || []), ...deleted.map((id) => ({ id, at: Date.now() }))]
+    );
+    const next = {
+      updatedAt: Date.now(),
+      sessions: merged,
+      deleted: dedupeTombstones([...(remote.deleted || []), ...deleted.map((id) => ({ id, at: Date.now() }))])
+    };
+    const sha = await ghPush(cfg, next, cur.sha);
+    state.lastSha = sha;
+    state.lastSync = Date.now();
+    state.error = '';
+    state.count = next.sessions.length;
+    return { ok: true, updatedAt: next.updatedAt, count: next.sessions.length };
+  }
   const res = await fetch(`${state.base}/api/store`, {
     method: 'POST',
     headers: headers(),
@@ -158,6 +251,16 @@ function branchKey(b) {
 /** 支线存档上限：每条支线最多留 5 轮，总共最多留 5 条 */
 export const BRANCH_KEEP_ROUNDS = 5;
 export const BRANCH_KEEP_COUNT = 5;
+
+function dedupeTombstones(list) {
+  const map = new Map();
+  for (const d of list || []) {
+    if (!d || !d.id) continue;
+    const prev = map.get(d.id) || 0;
+    map.set(d.id, Math.max(prev, d.at || 0));
+  }
+  return Array.from(map.entries()).map(([id, at]) => ({ id, at })).slice(-200);
+}
 
 export function trimBranch(b) {
   if (!b || !Array.isArray(b.rounds)) return b;

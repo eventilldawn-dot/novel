@@ -1667,6 +1667,9 @@ async function openSettings() {
   state.serverCfg = cfg;
   const local = localConfig.read();
   const syncCfg = syncApi.syncConfig.read();
+  const syncGh = { repo: '', path: 'novel.json', ...(syncCfg.gh || {}) };
+  syncGh.repo = syncCfg.gh?.owner && syncCfg.gh?.repo ? `${syncCfg.gh.owner}/${syncCfg.gh.repo}` : '';
+  const curBackend = syncCfg.backend || 'server';
   const srv = await probeServer(true);
   const info = await server.info();
   const urls = (info.addresses || []).map((u) => `<span class="hl">${esc(u)}</span>`).join('、');
@@ -1754,6 +1757,16 @@ async function openSettings() {
     <div class="field">
       <label class="field-label">跨设备同步<span class="field-hint">所有剧情存在跑 server.js 的那台电脑上</span></label>
       <div class="diag" id="s-sync-state"></div>
+      <div class="chip-row" id="s-sync-backend">
+        <button class="chip${curBackend === 'server' ? ' active' : ''}" data-sb="server">本机服务（电脑）</button>
+        <button class="chip${curBackend === 'github' ? ' active' : ''}" data-sb="github">GitHub 私有仓库（不用电脑开机）</button>
+      </div>
+      <div id="s-gh-fields" ${curBackend === 'github' ? '' : 'hidden'}>
+        <input id="s-gh-repo" type="text" value="${esc(syncGh.repo || '')}" placeholder="仓库：你的用户名/仓库名，例如 eventilldawn-dot/novel-data" />
+        <input id="s-gh-path" type="text" value="${esc(syncGh.path || 'novel.json')}" placeholder="文件名，例如 novel.json" style="margin-top:8px" />
+        <input id="s-gh-token" type="password" placeholder="${syncGh.token ? '已保存（留空不变）' : 'GitHub token：只给这个仓库的 Contents 读写权限'}" style="margin-top:8px" />
+        <div class="field-tip">token 只存在你本机浏览器，请求直连 api.github.com。仓库必须是<b>私有</b>的。</div>
+      </div>
       <input id="s-sync-url" type="text" value="${esc(syncCfg.serverUrl || '')}" placeholder="http://192.168.1.14:8787（线上版想连回家里时填）" />
       <input id="s-sync-token" type="text" value="${esc(syncCfg.token || '')}" placeholder="同步口令（启动 server.js 时终端会打印）" style="margin-top:8px" />
       <div class="chip-row" style="margin-top:9px">
@@ -1825,14 +1838,33 @@ async function openSettings() {
     paintSync();
 
     const applySyncForm = async () => {
+      const backend = modal.querySelector('#s-sync-backend .chip.active')?.dataset.sb || 'server';
+      const repoStr = modal.querySelector('#s-gh-repo').value.trim().replace(/^https?:\/\/github\.com\//, '');
+      const [owner, repoName] = repoStr.split('/');
+      const ghToken = modal.querySelector('#s-gh-token').value.trim();
       syncApi.syncConfig.write({
         serverUrl: modal.querySelector('#s-sync-url').value.trim(),
-        token: modal.querySelector('#s-sync-token').value.trim()
+        token: modal.querySelector('#s-sync-token').value.trim(),
+        backend,
+        gh: {
+          owner: owner || '',
+          repo: repoName || '',
+          path: modal.querySelector('#s-gh-path').value.trim() || 'novel.json',
+          token: ghToken || syncGh.token || ''
+        }
       });
       await syncApi.initSync();
       updateSyncUI();
       paintSync();
     };
+
+    modal.querySelector('#s-sync-backend').addEventListener('click', (e) => {
+      const chip = e.target.closest('[data-sb]');
+      if (!chip) return;
+      modal.querySelectorAll('#s-sync-backend .chip').forEach((c) => c.classList.remove('active'));
+      chip.classList.add('active');
+      modal.querySelector('#s-gh-fields').hidden = chip.dataset.sb !== 'github';
+    });
 
     modal.querySelector('#s-sync-now').addEventListener('click', async () => {
       await applySyncForm();
@@ -1935,7 +1967,19 @@ async function openSettings() {
       if (srv.up) await server.saveConfig(patch);
       syncApi.syncConfig.write({
         serverUrl: modal.querySelector('#s-sync-url').value.trim(),
-        token: modal.querySelector('#s-sync-token').value.trim()
+        token: modal.querySelector('#s-sync-token').value.trim(),
+        backend: modal.querySelector('#s-sync-backend .chip.active')?.dataset.sb || 'server',
+        gh: (() => {
+          const repoStr = modal.querySelector('#s-gh-repo').value.trim().replace(/^https?:\/\/github\.com\//, '');
+          const [owner, repoName] = repoStr.split('/');
+          const ghToken = modal.querySelector('#s-gh-token').value.trim();
+          return {
+            owner: owner || '',
+            repo: repoName || '',
+            path: modal.querySelector('#s-gh-path').value.trim() || 'novel.json',
+            token: ghToken || syncGh.token || ''
+          };
+        })()
       });
       await syncApi.initSync();
       state.serverCfg = (await server.getConfig()).config || {};
