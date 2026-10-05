@@ -180,12 +180,22 @@ export async function request({ messages, stream = true, json = true, onPartial,
   }
 
   if (t.kind === 'server') {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: apiHeaders(),
-      body: JSON.stringify({ messages, stream, config: reasoning ? { reasoningEffort: reasoning } : undefined }),
-      signal
-    });
+    let res;
+    try {
+      res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: apiHeaders(),
+        body: JSON.stringify({ messages, stream, config: reasoning ? { reasoningEffort: reasoning } : undefined }),
+        signal
+      });
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      const where = location.origin;
+      const hint = /trycloudflare|ngrok|serveo/.test(where)
+        ? '你打开的是旧的临时隧道地址，那个隧道早就关了。请改用固定的 Tailscale 地址（或电脑上的 localhost:8787）。'
+        : '检查网络是否正常；手机端请确认能连上家里的电脑（同一 WiFi 用局域网地址，在外用 Tailscale 地址）。';
+      throw Object.assign(new Error(`连不上服务（${where}）`), { kind: 'network', hint });
+    }
     if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { kind: 'network' });
     const ctype = res.headers.get('content-type') || '';
     if (!ctype.includes('text/event-stream')) {

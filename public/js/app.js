@@ -1085,7 +1085,10 @@ async function generate() {
       ui.toast('已停止本轮生成。');
     } else {
       // 生成失败：本轮不写入任何内容，把玩家刚才的输入留着，等他重试
-      state.lastFailure = `本轮生成失败：${err.message}${err.hint ? `\n建议：${err.hint}` : ''}`;
+      const base = err.kind === 'network'
+        ? `连不上服务：${err.message}`
+        : `本轮生成失败：${err.message}`;
+      state.lastFailure = `${base}${err.hint ? `\n建议：${err.hint}` : ''}`;
       state.failureRetry = true;
       await refreshEngineBanner(true);
       ui.toast('生成失败，本轮没有写入任何内容。点顶部提示里的「重试」再试一次。', 'warn');
